@@ -1,0 +1,36 @@
+RewriteEngine On
+RewriteRule ^api/state$   api.php [L,QSA]
+RewriteRule ^api/health$  api.php?health=1 [L,QSA]
+RewriteRule ^api/models$  api.php?models=1 [L,QSA]
+RewriteRule ^api/ai$      api.php?ai=1 [L,QSA]
+RewriteRule ^api/telegram$ api.php?telegram=1 [L,QSA]
+
+# ── Security Headers ──
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    # CSP: izinkan CDN yang digunakan aplikasi
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'self';"
+</IfModule>
+
+# ── Lindungi file sensitif ──
+<FilesMatch "\.(json|log|txt|sh|md)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# ── Aktifkan akses ke api.php ──
+<Files "api.php">
+    <IfModule mod_authz_core.c>
+        Require all granted
+    </IfModule>
+</Files>
+
+# Blokir akses direktori
+Options -Indexes

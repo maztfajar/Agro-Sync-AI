@@ -1,0 +1,22 @@
+services:
+  agrosync:
+    build: .
+    container_name: agrosync-ai
+    restart: unless-stopped
+    ports:
+      - "3080:3080"
+    environment:
+      - PORT=3080
+      - HOST=0.0.0.0
+      - TZ=Asia/Jakarta
+    volumes:
+      - ./data:/app/data
+
+  # OPSIONAL: Aktifkan blok di bawah jika ingin menjalankan Cloudflare Tunnel langsung via Docker
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   container_name: agrosync-tunnel
+  #   restart: unless-stopped
+  #   command: tunnel --no-autoupdate run --token TEMPATKAN_TOKEN_CLOUDFLARE_TUNNEL_DI_SINI
+  #   depends_on:
+  #     - agrosync

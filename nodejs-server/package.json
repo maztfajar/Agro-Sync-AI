@@ -1,0 +1,13 @@
+{
+  "name": "agrosync-ai",
+  "version": "2.0.0",
+  "description": "AgroSync AI — Budidaya Terpadu Sirkular, Vision AI Hemat Token & 2-Way Telegram Bot",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Fajar Wahyudi, S.Psi (Kapanewon Pengasih)"
+}
