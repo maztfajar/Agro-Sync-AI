@@ -96,6 +96,50 @@ Cukup buka file `hosting-php/index.html` (atau `nodejs-server/public/index.html`
 
 ---
 
+## 🔄 Alur Kerja Multi-PC (Sinkronisasi Antar-Perangkat)
+
+Jika proyek ini dikerjakan secara kolaboratif atau berpindah-pindah antar-PC (misalnya PC Kantor, Laptop, dan PC Rumah), ikuti alur kerja praktis berikut:
+
+### 1. Pertama Kali Pasang di PC Baru
+```bash
+git clone https://github.com/maztfajar/Agro-Sync-AI.git
+cd Agro-Sync-AI
+```
+
+### 2. Sebelum Mulai Bekerja (Tarik Pembaruan Terbaru)
+Jalankan salah satu cara di bawah ini untuk mengambil kode terbaru yang dikerjakan dari PC lain:
+- **Linux / macOS**:
+  ```bash
+  ./update.sh
+  ```
+- **Windows**:
+  Cukup klik ganda (double-click) file `update.bat`, atau jalankan di Command Prompt:
+  ```cmd
+  update.bat
+  ```
+- **Atau manual via Git / Antigravity IDE**:
+  ```bash
+  git pull origin main
+  ```
+  *(Atau klik ikon panah melingkar / **Sync Changes** di panel Source Control `Ctrl + Shift + G`).*
+
+> [!TIP]
+> Skrip `update.sh` dan `update.bat` sudah dilengkapi fitur cerdas:
+> - Menyimpan perubahan lokal sementara (*auto-stash*) jika ada pekerjaan yang belum sempat dikomit agar tidak bentrok.
+> - Menyinkronkan file frontend `hosting-php/index.html` dan `nodejs-server/public/index.html` secara otomatis.
+> - Menampilkan ringkasan komit dan pengembang yang terakhir kali memperbarui.
+
+### 3. Setelah Selesai Bekerja di PC Tersebut (Kirim ke GitHub)
+Kirim pembaruan agar bisa diambil saat Anda membuka PC lain:
+```bash
+git add .
+git commit -m "Update fitur/perbaikan: penjelasan singkat"
+git push origin main
+```
+*(Atau lakukan commit dan klik **Sync Changes** langsung di Antigravity IDE).*
+
+---
+
 ## 🔒 Keamanan Sistem
 
 - **Zero Credential Leakage**: Password pengguna di-hash dengan SHA-256 dan dilindungi di sisi client; tidak tersimpan terbuka di server publik.
@@ -111,6 +155,8 @@ Cukup buka file `hosting-php/index.html` (atau `nodejs-server/public/index.html`
 Agro-Sync-AI/
 ├── README.md                      # Dokumentasi utama repositori
 ├── README_DEPLOY_LENGKAP.md       # Panduan instalasi dan deployment teknis
+├── update.sh                      # Skrip 1-klik tarik pembaruan (Linux / macOS)
+├── update.bat                     # Skrip 1-klik tarik pembaruan (Windows)
 ├── hosting-php/                   # Paket rilis untuk shared hosting cPanel
 │   ├── index.html                 # Frontend SPA lengkap (Tailwind, Chart.js, jsPDF)
 │   ├── api.php                    # REST API proxy sinkronisasi, AI & Telegram
