@@ -413,17 +413,22 @@ function buildAgroSyncPdfBuffer(st) {
     y = 790;
   };
 
-  // ==================== HALAMAN 1: KOP, KPI, DIAGRAM SIRKULAR & GRAFIK ====================
-  // Header Banner Page 1
-  curOps.push('q 0.02 0.47 0.34 rg 36 780 523 45 re f Q');
-  curOps.push('q 0.85 0.55 0.05 rg 36 776 523 3 re f Q');
-  curOps.push('BT /F2 14 Tf 1 1 1 rg 46 805 Td (AGROSYNC AI - LAPORAN DETAIL BUDIDAYA SIRKULAR) Tj ET');
-  curOps.push('BT /F1 9 Tf 0.9 0.95 0.95 rg 46 790 Td (Kapanewon Pengasih, Kabupaten Kulon Progo, D.I. Yogyakarta) Tj ET');
+  // ==================== HALAMAN 1: KOP RESMI, KPI, DIAGRAM SIRKULAR & GRAFIK ====================
+  // Header Kop Resmi Kapanewon Pengasih
+  curOps.push('BT /F2 12 Tf 0.05 0.10 0.15 rg 130 812 Td (PEMERINTAH KABUPATEN KULON PROGO) Tj ET');
+  curOps.push('BT /F2 14 Tf 0.05 0.10 0.15 rg 130 798 Td (KAPANEWON PENGASIH) Tj ET');
+  curOps.push('BT /F1 7.2 Tf 0.25 0.30 0.38 rg 130 786 Td (Alamat. Jalan Purbowinoto No.6, Pengasih, Pengasih, Kulon Progo 55652, Telp. \\(0274\\) 773320) Tj ET');
+  curOps.push('BT /F1 6.8 Tf 0.05 0.40 0.70 rg 130 775 Td (Laman: https://pengasih.kulonprogokab.go.id/, Pos-el: pengasih@kulonprogokab.go.id) Tj ET');
+  // Garis Kop Dinas Ganda (Tebal & Tipis)
+  curOps.push('q 0.05 0.10 0.15 rg 36 766 523 1.8 re f Q');
+  curOps.push('q 0.05 0.10 0.15 rg 36 763 523 0.6 re f Q');
 
-  y = 755;
+  y = 746;
   const statusHari = wd.isHoliday ? 'Libur Kantor (' + wd.reason + ')' : 'Hari Kerja Kantor';
-  curOps.push(`BT /F1 8.5 Tf 0.35 0.40 0.50 rg 42 ${y} Td (Tanggal Laporan: ${wd.dayName}, ${dateKey} (${timeKey} WIB) | Status: ${statusHari} | Sistem: Zero-Waste) Tj ET`);
-  y -= 20;
+  curOps.push(`BT /F2 10.5 Tf 0.05 0.15 0.25 rg 42 ${y} Td (LAPORAN BULANAN PENGELOLAAN BUDIDAYA SIRKULAR TERPADU) Tj ET`);
+  y -= 13;
+  curOps.push(`BT /F1 8 Tf 0.35 0.40 0.50 rg 42 ${y} Td (Tanggal: ${wd.dayName}, ${dateKey} (${timeKey} WIB) | Status: ${statusHari} | Sistem: Zero-Waste Bioflok & BSF) Tj ET`);
+  y -= 18;
 
   // 1. KPI Cards
   curOps.push(`BT /F2 10.5 Tf 0.02 0.47 0.34 rg 42 ${y} Td (1. RINGKASAN EKSEKUTIF & INDIKATOR LINGKUNGAN SIRKULAR) Tj ET`);
