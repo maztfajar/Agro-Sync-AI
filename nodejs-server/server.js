@@ -322,6 +322,17 @@ async function tgSendDocument(token, chatId, pdfBuffer, filename, caption) {
   return resp.json();
 }
 
+function startTyping(token, chatId, action = 'typing') {
+  if (!token || !chatId) return () => {};
+  tgApi(token, 'sendChatAction', { chat_id: chatId, action }).catch(() => {});
+  const timer = setInterval(() => {
+    tgApi(token, 'sendChatAction', { chat_id: chatId, action }).catch(() => {});
+  }, 4000);
+  return () => {
+    try { clearInterval(timer); } catch (_) {}
+  };
+}
+
 async function broadcastTelegram(token, text, extra) {
   const targets = getTelegramTargets(state);
   const results = [];
@@ -717,6 +728,7 @@ async function sendTelegramHarvestAndEcoSummary(token, chatId) {
 }
 
 async function sendTelegramPdfExport(token, chatId) {
+  const stopTyping = startTyping(token, chatId, 'upload_document');
   syncRealtimeUnitAges(state);
   const { dateKey } = getWibNow();
   await tgApi(token, 'sendMessage', { chat_id: chatId, text: '📄 Sedang menyusun file Laporan PDF AgroSync AI terbaru...' });
@@ -729,6 +741,8 @@ async function sendTelegramPdfExport(token, chatId) {
     }
   } catch (err) {
     await tgApi(token, 'sendMessage', { chat_id: chatId, text: 'Gagal membuat PDF: ' + err.message });
+  } finally {
+    stopTyping();
   }
 }
 
@@ -765,9 +779,10 @@ async function startTelegramFormMenu(token, chatId) {
 // Handler Foto Telegram -> Analisis Vision AI Cermat (tanpa gejala manual pun tetap analisis + auto-update unit!)
 async function handleTelegramPhotoMessage(token, msg, timeKey) {
   const chatId = msg.chat.id;
+  const stopTyping = startTyping(token, chatId, 'typing');
   const sess = tgSessions.get(String(chatId)) || {};
   const photos = msg.photo || [];
-  if (photos.length === 0) return;
+  if (photos.length === 0) { stopTyping(); return; }
   const caption = (msg.caption || '').trim();
   const fallbackName = [msg.from && msg.from.first_name, msg.from && msg.from.last_name].filter(Boolean).join(' ');
   const senderName = findUserNameByChatId(state, chatId, fallbackName);
@@ -987,6 +1002,8 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
   } catch (err) {
     console.error('[Telegram Photo] Error:', err.message);
     await tgApi(token, 'sendMessage', { chat_id: chatId, text: 'Gagal menganalisis foto: ' + err.message });
+  } finally {
+    stopTyping();
   }
 }
 
@@ -1587,7 +1604,9 @@ function processExtractedUnits(parsed, rawQuestion, senderName) {
 }
 
 async function answerTelegramQuestionWithData(token, chatId, question, senderName) {
-  syncRealtimeUnitAges(state);
+  const stopTyping = startTyping(token, chatId, 'typing');
+  try {
+    syncRealtimeUnitAges(state);
   // 1. Cek terlebih dahulu apakah pesan merupakan input data natural lokal singkat
   const localLoggedReply = tryLocalNaturalDataEntry(question, senderName);
   if (localLoggedReply) {
@@ -1756,13 +1775,16 @@ Jawab pertanyaan/konsultasi pengguna dalam bahasa Indonesia ramah, solutif, berd
     answer = generateLocalTelegramAnswer(question, state);
   }
 
-  const sRes = await tgApi(token, 'sendMessage', {
-    chat_id: chatId,
-    text: answer,
-    parse_mode: 'Markdown',
-    reply_markup: { inline_keyboard: [[{ text: '🏠 Menu Utama', callback_data: 'menu:home' }, { text: '📸 Kirim Foto Cek AI', callback_data: 'menu:photo' }]] }
-  });
-  console.log(`[Telegram Bot] Balasan terkirim ke ${chatId}:`, sRes && sRes.ok ? 'BERHASIL' : (sRes && sRes.description));
+    const sRes = await tgApi(token, 'sendMessage', {
+      chat_id: chatId,
+      text: answer,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '🏠 Menu Utama', callback_data: 'menu:home' }, { text: '📸 Kirim Foto Cek AI', callback_data: 'menu:photo' }]] }
+    });
+    console.log(`[Telegram Bot] Balasan terkirim ke ${chatId}:`, sRes && sRes.ok ? 'BERHASIL' : (sRes && sRes.description));
+  } finally {
+    stopTyping();
+  }
 }
 
 let pollingActive = false;
@@ -1925,8 +1947,8 @@ async function pollTelegramUpdates() {
           const txt = upd.message.text.trim();
           const lower = txt.toLowerCase();
           const fallbackName = [upd.message.from.first_name, upd.message.from.last_name].filter(Boolean).join(' ');
-          const actorName = findUserNameByChatId(state, chatId, fallbackName);
           console.log(`[Telegram Bot] Pesan masuk dari ${chatId} (${actorName}): "${txt.slice(0, 80).replace(/\n/g, ' ')}"`);
+          tgApi(token, 'sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
 
           // Direct Menu Commands & Persistent Keyboard Buttons
           if (lower === '/start' || lower === '/menu' || lower === 'menu') {

@@ -146,6 +146,7 @@ if (!empty($upd['callback_query']['data']) && strpos($upd['callback_query']['dat
     $txt = trim($upd['message']['text']);
     $fb = trim(($upd['message']['from']['first_name'] ?? '') . ' ' . ($upd['message']['from']['last_name'] ?? ''));
     $doneBy = find_user_name($state, $replyChatId, $fb);
+    tg_post($token, 'sendChatAction', ['chat_id' => $replyChatId, 'action' => 'typing']);
     if (stripos($txt, '/selesai ') === 0) {
         $parts = preg_split('/\s+/', $txt);
         $taskId = $parts[1] ?? '';
