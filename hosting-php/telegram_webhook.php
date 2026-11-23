@@ -20,6 +20,17 @@ $upd = json_decode(file_get_contents('php://input'), true);
 if (!$upd) { http_response_code(200); exit; }
 
 function tg_post($token, $method, $payload) {
+    if ($method === 'sendMessage' && !empty($payload['text']) && mb_strlen($payload['text'], 'UTF-8') > 3800) {
+        $full = $payload['text'];
+        $lastRes = null;
+        for ($i = 0; $i < mb_strlen($full, 'UTF-8'); $i += 3800) {
+            $chunk = mb_substr($full, $i, 3800, 'UTF-8');
+            $sub = $payload;
+            $sub['text'] = $chunk;
+            $lastRes = tg_post($token, 'sendMessage', $sub);
+        }
+        return $lastRes;
+    }
     $url = "https://api.telegram.org/bot" . urlencode($token) . "/" . $method;
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -312,13 +323,13 @@ if (!empty($upd['callback_query']['data']) && strpos($upd['callback_query']['dat
         // 6. Jika belum tertangani oleh regex, panggil AI Extraction (jika API AI aktif)
         $aiCfg = $state['aiConfig'] ?? [];
         if (!$handled && !empty($aiCfg['enabled']) && !empty($aiCfg['apiKey']) && !empty($aiCfg['baseUrl'])) {
-            $prompt = 'Kamu Asisten AgroSync AI Kapanewon Pengasih. Jika pesan berupa LAPORAN, INPUT DATA BARU, UPDATE DATA, ATAU ECO STATS: Balas HANYA JSON valid: {"intent":"log_data","newUnits":[{"category":"ternak|maggot|tanaman","species":"Ikan Lele|Maggot BSF|Cabai Rawit","name":"Kolam Lele 1","population":"300 ekor","ageDays":5,"metric":7.0,"statusNote":"Sehat"}],"updateUnits":[{"unitName":"nama unit","newMetric":12.0,"newAgeDays":0,"newStatus":"sehat"}],"wasteKgAdd":0,"waterLitersAdd":0,"kasgotKgAdd":0,"confirmMsg":"ringkasan data"}. Jika berupa PERTANYAAN: Jawab ramah singkat.';
+            $prompt = 'Kamu Asisten AgroSync AI Kapanewon Pengasih. Jika pesan berupa LAPORAN, INPUT DATA BARU, UPDATE DATA, GANTI DATA, ATAU ECO STATS: Balas HANYA JSON valid: {"intent":"log_data","replaceExistingUnits":false,"newUnits":[{"category":"ternak|maggot|tanaman","species":"Ikan Lele|Maggot BSF|Cabai Rawit","name":"Kolam Lele 1","population":"300 ekor","ageDays":5,"metric":7.0,"statusNote":"Sehat"}],"updateUnits":[{"unitName":"nama unit","newMetric":12.0,"newAgeDays":0,"newStatus":"sehat"}],"wasteKgAdd":0,"waterLitersAdd":0,"kasgotKgAdd":0,"confirmMsg":"ringkasan data"}. Set replaceExistingUnits:true jika pesan menyebut ingin mengganti data lama. Jika berupa PERTANYAAN: Jawab ramah singkat.';
             $ch = curl_init(rtrim($aiCfg['baseUrl'], '/') . '/chat/completions');
             curl_setopt_array($ch, [
-                CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 25,
+                CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30,
                 CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . trim($aiCfg['apiKey'])],
                 CURLOPT_POSTFIELDS => json_encode([
-                    'model' => $aiCfg['model'] ?? 'gpt-4o-mini', 'max_tokens' => 1200, 'temperature' => 0.2,
+                    'model' => $aiCfg['model'] ?? 'gpt-4o-mini', 'max_tokens' => 3500, 'temperature' => 0.1,
                     'messages' => [
                         ['role' => 'system', 'content' => $prompt],
                         ['role' => 'user', 'content' => "Pesan dari {$doneBy}: {$txt}"]
@@ -331,6 +342,11 @@ if (!empty($upd['callback_query']['data']) && strpos($upd['callback_query']['dat
             if (preg_match('/\{[\s\S]*\}/', $aiTxt, $m)) {
                 $p = json_decode($m[0], true);
                 if (!empty($p) && ($p['intent'] ?? '') === 'log_data') {
+                    if (!empty($p['replaceExistingUnits']) && !empty($p['newUnits']) && is_array($p['newUnits'])) {
+                        $state['units'] = [];
+                        $state['schedules'] = array_values(array_filter($state['schedules'] ?? [], function($s) { return empty($s['aiGenerated']); }));
+                        $notes[] = '🔄 *Data Lama Dikosongkan* (Diganti data baru dari pesan)';
+                    }
                     if (!empty($p['newUnits']) && is_array($p['newUnits'])) {
                         foreach ($p['newUnits'] as $nu) {
                             if (!empty($nu['name'])) {

@@ -271,6 +271,18 @@ function getMainInlineKeyboard() {
 }
 
 async function tgApi(token, method, body) {
+  if (method === 'sendMessage' && body && typeof body.text === 'string' && body.text.length > 3800) {
+    const text = body.text;
+    const chunkSize = 3800;
+    let lastRes = null;
+    for (let i = 0; i < text.length; i += chunkSize) {
+      const chunk = text.slice(i, i + chunkSize);
+      const subBody = Object.assign({}, body, { text: chunk });
+      if (i + chunkSize < text.length) delete subBody.reply_markup;
+      lastRes = await tgApi(token, 'sendMessage', subBody);
+    }
+    return lastRes;
+  }
   const url = `https://api.telegram.org/bot${encodeURIComponent(token)}/${method}`;
   try {
     const resp = await fetch(url, {
@@ -1360,8 +1372,8 @@ Jawab langsung dalam bahasa Indonesia ramah, solutif, berdasarkan data aplikasi.
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiCfg.apiKey.trim() },
         body: JSON.stringify({
           model: aiCfg.model || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
-          max_tokens: 1500,
-          temperature: 0.2,
+          max_tokens: 3500,
+          temperature: 0.1,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: `Hari: ${wd.dayName} ${wd.dateKey} (${wd.isHoliday ? 'Libur: ' + wd.reason : 'Hari Kerja Kantor'}). ${wCtx}\nUNIT AKTIF: ${unitCtx}\nJADWAL: ${schedCtx}\nRIWAYAT PANEN: ${harvCtx}\nECO: sampah ${eco.wasteKg}kg, air kolam ${eco.waterLiters}L, kasgot ${eco.kasgotKg}kg\n\nPesan dari ${senderName}: ${question}` }
