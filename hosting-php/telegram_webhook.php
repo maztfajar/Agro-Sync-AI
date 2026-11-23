@@ -212,6 +212,40 @@ if (!empty($upd['callback_query']['data']) && strpos($upd['callback_query']['dat
                 $metric = (float)str_replace(',', '.', $mMatch[1]);
             }
 
+            $existingIdx = -1;
+            foreach ($state['units'] as $idx => $u) {
+                if (($u['category'] ?? '') === $cat) {
+                    $uNm = mb_strtolower($u['name'] ?? '', 'UTF-8');
+                    $nNm = mb_strtolower($unitName, 'UTF-8');
+                    if ($uNm === $nNm || strpos($uNm, $nNm) !== false || strpos($nNm, $uNm) !== false) {
+                        $existingIdx = $idx;
+                        break;
+                    }
+                }
+            }
+            $mU = $cat === 'maggot' ? 'mm' : 'cm';
+            if ($existingIdx >= 0) {
+                $ex = &$state['units'][$existingIdx];
+                $isIdentical = abs((float)($ex['metric'] ?? 0) - $metric) < 0.1 && (int)($ex['ageDays'] ?? 0) === $ageDays;
+                if ($isIdentical) {
+                    $replyMsg = "⚠️ *Verifikasi Ulang: Data Sudah Pernah Tercatat Sebelumnya!*\n\nUnit *{$ex['name']}* ({$ex['species']}, {$ex['population']}, Hr {$ex['ageDays']}, {$ex['metric']} {$mU}) sudah tercatat aktif di AgroSync AI.\n\n🛡️ *Perlindungan Duplikasi:* Data tidak digandakan. Unit tetap aktif dan terjadwal di Web App.";
+                    tg_post($token, 'sendMessage', ['chat_id' => $replyChatId, 'text' => $replyMsg, 'parse_mode' => 'Markdown']);
+                    exit;
+                } else {
+                    $ex['metric'] = $metric;
+                    $ex['ageDays'] = $ageDays;
+                    $ex['startDate'] = date('Y-m-d', strtotime('-' . ($ageDays - 1) . ' days'));
+                    if (!isset($ex['history']) || !is_array($ex['history'])) $ex['history'] = [];
+                    $ex['history'][] = $metric;
+                    if (count($ex['history']) > 12) array_shift($ex['history']);
+                    $state['updatedAt'] = round(microtime(true) * 1000);
+                    file_put_contents($stateFile, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+                    $replyMsg = "🔄 *Pembaruan Data Unit Berhasil!*\n\n• Unit: *{$ex['name']}*\n• Umur Kini: *Hr {$ex['ageDays']}*\n• Ukuran Kini: *{$ex['metric']} {$mU}*\n\n_Data otomatis tersinkron ke Web App._";
+                    tg_post($token, 'sendMessage', ['chat_id' => $replyChatId, 'text' => $replyMsg, 'parse_mode' => 'Markdown']);
+                    exit;
+                }
+            }
+
             $newId = 'u' . time() . rand(100, 999);
             $newUnit = [
                 'id' => $newId,
@@ -347,6 +381,9 @@ if (!empty($upd['callback_query']['data']) && strpos($upd['callback_query']['dat
                         $state['schedules'] = array_values(array_filter($state['schedules'] ?? [], function($s) { return empty($s['aiGenerated']); }));
                         $notes[] = '🔄 *Data Lama Dikosongkan* (Diganti data baru dari pesan)';
                     }
+                    $newCreated = [];
+                    $updated = [];
+                    $reverified = [];
                     if (!empty($p['newUnits']) && is_array($p['newUnits'])) {
                         foreach ($p['newUnits'] as $nu) {
                             if (!empty($nu['name'])) {
@@ -354,36 +391,85 @@ if (!empty($upd['callback_query']['data']) && strpos($upd['callback_query']['dat
                                 $uAge = max(1, (int)($nu['ageDays'] ?? 1));
                                 $uMetric = max(0.1, round((float)($nu['metric'] ?? ($cat === 'maggot' ? 8 : 7)) * 10) / 10);
                                 $species = $nu['species'] ?? ($cat === 'ternak' ? 'Ikan Lele' : ($cat === 'maggot' ? 'Maggot BSF' : 'Cabai Rawit'));
-                                $newUnit = [
-                                    'id' => 'u' . time() . rand(100, 999),
-                                    'category' => $cat,
-                                    'species' => $species,
-                                    'name' => $nu['name'],
-                                    'population' => $nu['population'] ?? ($cat === 'ternak' ? '200 ekor' : ($cat === 'maggot' ? '1 kg' : '10 polybag')),
-                                    'startDate' => date('Y-m-d', strtotime('-' . ($uAge - 1) . ' days')),
-                                    'ageDays' => $uAge,
-                                    'targetDays' => $cat === 'ternak' ? 60 : ($cat === 'maggot' ? 18 : 60),
-                                    'targetSize' => $cat === 'ternak' ? 24 : ($cat === 'maggot' ? 22 : 50),
-                                    'metric' => $uMetric,
-                                    'visual1' => $cat === 'ternak' ? 'Hijau Kecokelatan' : ($cat === 'maggot' ? 'Gembur & Lembab' : 'Hijau Segar'),
-                                    'visual2' => 'Normal',
-                                    'statusNote' => $nu['statusNote'] ?? 'Sehat & Aktif',
-                                    'history' => [$uMetric],
-                                    'checklistDone' => [false, false, false]
-                                ];
-                                $state['units'][] = $newUnit;
                                 $mU = $cat === 'maggot' ? 'mm' : 'cm';
-                                $notes[] = "✨ *Unit Baru:* {$nu['name']} ({$species}, Hr {$uAge}, {$uMetric} {$mU})";
-                                $handled = true;
+
+                                $existingIdx = -1;
+                                foreach ($state['units'] as $idx => $u) {
+                                    if (($u['category'] ?? '') === $cat) {
+                                        $uNm = mb_strtolower($u['name'] ?? '', 'UTF-8');
+                                        $nNm = mb_strtolower($nu['name'], 'UTF-8');
+                                        if ($uNm === $nNm || strpos($uNm, $nNm) !== false || strpos($nNm, $uNm) !== false) {
+                                            $existingIdx = $idx;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if ($existingIdx >= 0) {
+                                    $ex = &$state['units'][$existingIdx];
+                                    $isIdentical = abs((float)($ex['metric'] ?? 0) - $uMetric) < 0.1 && (int)($ex['ageDays'] ?? 0) === $uAge;
+                                    if ($isIdentical) {
+                                        $reverified[] = "• *{$ex['name']}* ({$ex['species']}, {$ex['population']}, Hr {$ex['ageDays']}, {$ex['metric']} {$mU}) — *Sudah aktif di sistem*";
+                                    } else {
+                                        $ex['metric'] = $uMetric;
+                                        $ex['ageDays'] = $uAge;
+                                        $ex['startDate'] = date('Y-m-d', strtotime('-' . ($uAge - 1) . ' days'));
+                                        if (!empty($nu['population'])) $ex['population'] = $nu['population'];
+                                        if (!empty($nu['statusNote'])) $ex['statusNote'] = $nu['statusNote'];
+                                        if (!isset($ex['history']) || !is_array($ex['history'])) $ex['history'] = [];
+                                        $ex['history'][] = $uMetric;
+                                        if (count($ex['history']) > 12) array_shift($ex['history']);
+                                        $updated[] = "• *{$ex['name']}* -> Hr {$ex['ageDays']}, {$ex['metric']} {$mU} ({$ex['statusNote']})";
+                                    }
+                                } else {
+                                    $newUnit = [
+                                        'id' => 'u' . time() . rand(100, 999),
+                                        'category' => $cat,
+                                        'species' => $species,
+                                        'name' => $nu['name'],
+                                        'population' => $nu['population'] ?? ($cat === 'ternak' ? '200 ekor' : ($cat === 'maggot' ? '1 kg' : '10 polybag')),
+                                        'startDate' => date('Y-m-d', strtotime('-' . ($uAge - 1) . ' days')),
+                                        'ageDays' => $uAge,
+                                        'targetDays' => $cat === 'ternak' ? 60 : ($cat === 'maggot' ? 18 : 60),
+                                        'targetSize' => $cat === 'ternak' ? 24 : ($cat === 'maggot' ? 22 : 50),
+                                        'metric' => $uMetric,
+                                        'visual1' => $cat === 'ternak' ? 'Hijau Kecokelatan' : ($cat === 'maggot' ? 'Gembur & Lembab' : 'Hijau Segar'),
+                                        'visual2' => 'Normal',
+                                        'statusNote' => $nu['statusNote'] ?? 'Sehat & Aktif',
+                                        'history' => [$uMetric],
+                                        'checklistDone' => [false, false, false]
+                                    ];
+                                    $state['units'][] = $newUnit;
+                                    $newCreated[] = "• *{$nu['name']}* ({$species}, Hr {$uAge}, {$uMetric} {$mU})";
+                                }
                             }
                         }
                     }
                     $wAdd = (float)($p['wasteKgAdd'] ?? 0);
                     $lAdd = (float)($p['waterLitersAdd'] ?? 0);
                     $kAdd = (float)($p['kasgotKgAdd'] ?? 0);
-                    if ($wAdd > 0) { $state['ecoStats']['wasteKg'] = round(($state['ecoStats']['wasteKg'] + $wAdd) * 10) / 10; $notes[] = "♻️ Sampah ke Maggot: *+{$wAdd} kg*"; $handled = true; }
-                    if ($lAdd > 0) { $state['ecoStats']['waterLiters'] = round($state['ecoStats']['waterLiters'] + $lAdd); $notes[] = "💧 Air Kolam Didaur Ulang: *+{$lAdd} L*"; $handled = true; }
-                    if ($kAdd > 0) { $state['ecoStats']['kasgotKg'] = round(($state['ecoStats']['kasgotKg'] + $kAdd) * 10) / 10; $notes[] = "🌱 Kasgot: *+{$kAdd} kg*"; $handled = true; }
+                    if ($wAdd > 0) { $state['ecoStats']['wasteKg'] = round(($state['ecoStats']['wasteKg'] + $wAdd) * 10) / 10; $notes[] = "♻️ Sampah ke Maggot: *+{$wAdd} kg*"; }
+                    if ($lAdd > 0) { $state['ecoStats']['waterLiters'] = round($state['ecoStats']['waterLiters'] + $lAdd); $notes[] = "💧 Air Kolam Didaur Ulang: *+{$lAdd} L*"; }
+                    if ($kAdd > 0) { $state['ecoStats']['kasgotKg'] = round(($state['ecoStats']['kasgotKg'] + $kAdd) * 10) / 10; $notes[] = "🌱 Kasgot: *+{$kAdd} kg*"; }
+
+                    $handled = (count($newCreated) > 0 || count($updated) > 0 || count($reverified) > 0 || count($notes) > 0);
+                    if ($handled) {
+                        $state['updatedAt'] = round(microtime(true) * 1000);
+                        file_put_contents($stateFile, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+
+                        if (count($newCreated) === 0 && count($updated) === 0 && count($reverified) > 0) {
+                            $replyMsg = "⚠️ *Verifikasi Ulang: Data Sudah Pernah Tercatat Sebelumnya!*\n\nSistem mendeteksi data yang Anda kirimkan telah tercatat sebelumnya di AgroSync AI:\n\n" . implode("\n", $reverified) . "\n\n🛡️ *Perlindungan Duplikasi:* Data tidak diduplikasi/digandakan. Semua unit di atas tetap aktif dan terjadwal sesuai jam kantor (07:30–16:00 WIB) di Web App.";
+                        } else {
+                            $sections = [];
+                            if (count($notes) > 0) $sections[] = implode("\n", $notes);
+                            if (count($newCreated) > 0) $sections[] = "✨ *Unit Baru Berhasil Ditambahkan ke Web App:*\n" . implode("\n", $newCreated);
+                            if (count($updated) > 0) $sections[] = "🔄 *Pembaruan Data Unit:*\n" . implode("\n", $updated);
+                            if (count($reverified) > 0) $sections[] = "ℹ️ *Verifikasi Ulang (Unit Sudah Pernah Ada):*\n" . implode("\n", $reverified);
+                            $replyMsg = "✅ *Data Berhasil Disimpan & Tersinkron ke Web App!*\n\n" . implode("\n\n", $sections) . "\n\n_Pelapor: {$doneBy} • Jadwal kantor 07:30–16:00 WIB telah aktif._";
+                        }
+                        tg_post($token, 'sendMessage', ['chat_id' => $replyChatId, 'text' => $replyMsg, 'parse_mode' => 'Markdown']);
+                        exit;
+                    }
                 }
             }
         }
