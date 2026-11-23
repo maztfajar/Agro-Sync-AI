@@ -272,12 +272,32 @@ function getMainInlineKeyboard() {
 
 async function tgApi(token, method, body) {
   const url = `https://api.telegram.org/bot${encodeURIComponent(token)}/${method}`;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body || {})
-  });
-  return resp.json();
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    });
+    let data = await resp.json();
+    if (!data.ok && body && body.parse_mode && method === 'sendMessage') {
+      console.warn(`[Telegram tgApi] Retry sendMessage without parse_mode due to: ${data.description}`);
+      const fallbackBody = Object.assign({}, body);
+      delete fallbackBody.parse_mode;
+      const resp2 = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fallbackBody)
+      });
+      data = await resp2.json();
+    }
+    if (!data.ok) {
+      console.error(`[Telegram tgApi Error] ${method}:`, data.description);
+    }
+    return data;
+  } catch (err) {
+    console.error(`[Telegram tgApi Network Error] ${method}:`, err.message);
+    return { ok: false, description: err.message };
+  }
 }
 
 async function tgSendDocument(token, chatId, pdfBuffer, filename, caption) {
@@ -1102,6 +1122,11 @@ function tryLocalNaturalDataEntry(text, senderName) {
   if (!state) return null;
   const raw = String(text || '').trim();
   const q = raw.toLowerCase();
+  // Jika pesan berupa multi-baris, teks panjang (>120 karakter), atau instruksi multi-data kompleks:
+  // Serahkan sepenuhnya ke AI extraction (Lapis 2) agar seluruh data diekstrak secara utuh!
+  if (raw.includes('\n') || raw.length > 120 || /(?:berikut|sebagai berikut|kategori|daftar|ganti|menggantikan)/i.test(q)) {
+    return null;
+  }
   // Abaikan jika kalimat jelas merupakan pertanyaan murni
   if (/^(apakah|bagaimana|gimana|kenapa|mengapa|kapan|berapa|siapa|dimana|di mana|mana|tolong jelaskan|jelaskan|apa\s)/.test(q) || (q.includes('?') && !/(tambah|input|tebar|tanam|ukuran|sampah|air kolam|kasgot)/i.test(q))) {
     return null;
@@ -1295,10 +1320,11 @@ async function answerTelegramQuestionWithData(token, chatId, question, senderNam
       const endpoint = aiCfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
       const systemPrompt = `Kamu Asisten AgroSync AI Kapanewon Pengasih di Telegram. ${GROUNDED_AI_STANDARDS}
 TUGAS UTAMA:
-(1) Jika pesan pengguna berupa LAPORAN, INPUT DATA BARU, UPDATE DATA, ATAU ECO STATS:
+(1) Jika pesan pengguna berupa LAPORAN, INPUT DATA BARU, UPDATE DATA, GANTI DATA, ATAU ECO STATS:
 Balas HANYA JSON valid (tanpa teks pengantar apapun):
 {
   "intent": "log_data",
+  "replaceExistingUnits": false,
   "newUnits": [
     {
       "category": "ternak|maggot|tanaman",
@@ -1324,6 +1350,7 @@ Balas HANYA JSON valid (tanpa teks pengantar apapun):
   "kasgotKgAdd": 0,
   "confirmMsg": "penjelasan singkat ramah data yang berhasil disimpan"
 }
+Catatan: Set "replaceExistingUnits": true JIKA pengguna menyatakan ingin mengganti/reset data lama dengan data baru yang dikirimkan.
 
 (2) Jika pesan berupa PERTANYAAN, KONSULTASI, ATAU SAPAAN:
 Jawab langsung dalam bahasa Indonesia ramah, solutif, berdasarkan data aplikasi.`;
@@ -1352,6 +1379,13 @@ Jawab langsung dalam bahasa Indonesia ramah, solutif, berdasarkan data aplikasi.
             const parsed = JSON.parse(jsonMatch[0]);
             if (parsed && parsed.intent === 'log_data') {
               const notes = [];
+
+              // 0. Reset data unit lama jika replaceExistingUnits bernilai true
+              if (parsed.replaceExistingUnits === true && Array.isArray(parsed.newUnits) && parsed.newUnits.length > 0) {
+                state.units = [];
+                state.schedules = (state.schedules || []).filter(s => !s.aiGenerated);
+                notes.push('🔄 *Data Lama Dikosongkan* (Diganti data baru dari laporan)');
+              }
 
               // 1. Tambah unit baru dari ekstraksi AI
               if (Array.isArray(parsed.newUnits) && parsed.newUnits.length > 0) {
@@ -1420,7 +1454,9 @@ Jawab langsung dalam bahasa Indonesia ramah, solutif, berdasarkan data aplikasi.
                 handledLog = true;
               }
             }
-          } catch (_) {}
+          } catch (err) {
+            console.error('[AI Parse Error]:', err.message);
+          }
         }
         if (!handledLog) {
           answer = '🤖 *Jawaban AgroSync AI:*\n' + content.trim();
@@ -1437,12 +1473,13 @@ Jawab langsung dalam bahasa Indonesia ramah, solutif, berdasarkan data aplikasi.
     answer = generateLocalTelegramAnswer(question, state);
   }
 
-  await tgApi(token, 'sendMessage', {
+  const sRes = await tgApi(token, 'sendMessage', {
     chat_id: chatId,
     text: answer,
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: [[{ text: '🏠 Menu Utama', callback_data: 'menu:home' }, { text: '📸 Kirim Foto Cek AI', callback_data: 'menu:photo' }]] }
   });
+  console.log(`[Telegram Bot] Balasan terkirim ke ${chatId}:`, sRes && sRes.ok ? 'BERHASIL' : (sRes && sRes.description));
 }
 
 let pollingActive = false;
@@ -1606,6 +1643,7 @@ async function pollTelegramUpdates() {
           const lower = txt.toLowerCase();
           const fallbackName = [upd.message.from.first_name, upd.message.from.last_name].filter(Boolean).join(' ');
           const actorName = findUserNameByChatId(state, chatId, fallbackName);
+          console.log(`[Telegram Bot] Pesan masuk dari ${chatId} (${actorName}): "${txt.slice(0, 80).replace(/\n/g, ' ')}"`);
 
           // Direct Menu Commands & Persistent Keyboard Buttons
           if (lower === '/start' || lower === '/menu' || lower === 'menu') {
@@ -1712,8 +1750,8 @@ async function pollTelegramUpdates() {
         }
       }
     }
-  } catch (_) {
-    // Silent retry
+  } catch (err) {
+    console.error('[Telegram Polling Error]:', err.message);
   } finally {
     pollingActive = false;
   }

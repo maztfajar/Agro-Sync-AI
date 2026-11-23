@@ -20,7 +20,8 @@ $upd = json_decode(file_get_contents('php://input'), true);
 if (!$upd) { http_response_code(200); exit; }
 
 function tg_post($token, $method, $payload) {
-    $ch = curl_init("https://api.telegram.org/bot" . urlencode($token) . "/" . $method);
+    $url = "https://api.telegram.org/bot" . urlencode($token) . "/" . $method;
+    $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_RETURNTRANSFER => true,
@@ -30,6 +31,20 @@ function tg_post($token, $method, $payload) {
     ]);
     $res = curl_exec($ch);
     curl_close($ch);
+    $arr = json_decode($res, true);
+    if (!empty($payload['parse_mode']) && empty($arr['ok']) && $method === 'sendMessage') {
+        unset($payload['parse_mode']);
+        $ch2 = curl_init($url);
+        curl_setopt_array($ch2, [
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_TIMEOUT => 10
+        ]);
+        $res = curl_exec($ch2);
+        curl_close($ch2);
+    }
     return $res;
 }
 
@@ -139,8 +154,9 @@ if (!empty($upd['callback_query']['data']) && strpos($upd['callback_query']['dat
         if (!isset($state['units']) || !is_array($state['units'])) $state['units'] = [];
         if (!isset($state['ecoStats']) || !is_array($state['ecoStats'])) $state['ecoStats'] = ['wasteKg' => 0, 'waterLiters' => 0, 'kasgotKg' => 0];
 
-        // 1. Deteksi Cepat Tambah Unit via Regex
-        $isAdd = preg_match('/\b(tambah|input|buat|masukkan|tebar|tanam|semai)\b/i', $txt) &&
+        // 1. Deteksi Cepat Tambah Unit via Regex (hanya untuk teks pendek 1 baris)
+        $isComplex = (strpos($txt, "\n") !== false) || strlen($txt) > 120 || preg_match('/(berikut|sebagai berikut|kategori|daftar|ganti|menggantikan)/i', $txt);
+        $isAdd = !$isComplex && preg_match('/\b(tambah|input|buat|masukkan|tebar|tanam|semai)\b/i', $txt) &&
                  preg_match('/\b(lele|nila|ikan|kolam|maggot|bsf|biopond|cabai|cabe|tomat|terong|kangkung|bayam|pakcoy|sawi|tanaman|polybag|polibag|bedeng)\b/i', $txt);
         if ($isAdd) {
             $cat = 'tanaman';
