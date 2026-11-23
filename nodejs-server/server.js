@@ -401,83 +401,228 @@ function buildAgroSyncPdfBuffer(st) {
   const harvests = (st && Array.isArray(st.harvestHistory)) ? st.harvestHistory : [];
   const eco = (st && st.ecoStats) || { wasteKg: 0, waterLiters: 0, kasgotKg: 0 };
   const journal = (st && Array.isArray(st.aiJournal)) ? st.aiJournal : [];
-
   const doneCount = schedules.filter(s => s.done).length;
-  const pendingCount = schedules.length - doneCount;
 
-  // Build logical lines: { text, size, bold, color, gapAfter }
-  const docLines = [];
-  const pushLine = (text, opts = {}) => docLines.push(Object.assign({ text, size: 10, bold: false, color: '0.12 0.16 0.22', gapAfter: 4 }, opts));
-
-  pushLine('AGROSYNC AI - LAPORAN BUDIDAYA SIRKULAR TERPADU', { size: 15, bold: true, color: '0.02 0.47 0.34', gapAfter: 2 });
-  pushLine('Kapanewon Pengasih, Kabupaten Kulon Progo, DIY', { size: 11, bold: true, color: '0.20 0.25 0.33', gapAfter: 2 });
-  pushLine(`Tanggal Laporan: ${wd.dayName}, ${dateKey} (${timeKey} WIB) | Status: ${wd.isHoliday ? 'Libur Kantor (' + wd.reason + ')' : 'Hari Kerja Kantor'}`, { size: 9, color: '0.39 0.45 0.55', gapAfter: 10 });
-
-  pushLine('1. RINGKASAN & DAMPAK LINGKUNGAN SIRKULAR', { size: 11, bold: true, color: '0.02 0.47 0.34', gapAfter: 4 });
-  pushLine(`- Total Unit Aktif        : ${units.length} unit (Perhitungan umur realtime WIB)`);
-  pushLine(`- Status Jadwal Perawatan : ${doneCount} selesai | ${pendingCount} belum dikerjakan (Total ${schedules.length})`);
-  pushLine(`- Sampah Organik Terolah  : ${Number(eco.wasteKg || 0).toFixed(1)} kg (oleh Maggot BSF)`);
-  pushLine(`- Air Kolam Didaur Ulang  : ${Math.round(Number(eco.waterLiters || 0))} Liter (siram kebun kantor)`);
-  pushLine(`- Pupuk Organik Kasgot    : ${Number(eco.kasgotKg || 0).toFixed(1)} kg | Riwayat Panen Internal: ${harvests.length}x`, { gapAfter: 10 });
-
-  pushLine('2. PERKEMBANGAN UNIT AKTIF & PROGRES PANEN (REALTIME)', { size: 11, bold: true, color: '0.02 0.47 0.34', gapAfter: 4 });
-  if (units.length === 0) {
-    pushLine('- Belum ada unit terdaftar.', { gapAfter: 8 });
-  } else {
-    units.forEach((u, idx) => {
-      const pct = Math.min(100, Math.round(((u.ageDays || 1) / Math.max(1, u.targetDays || 30)) * 100));
-      const daysLeft = Math.max(0, (u.targetDays || 30) - (u.ageDays || 1));
-      const mUnit = u.category === 'maggot' ? 'mm' : 'cm';
-      const head = `${idx + 1}. ${u.name} (${u.species})`;
-      const detail = `   Umur: Hr ${u.ageDays}/${u.targetDays} (${pct}%, ${daysLeft === 0 ? 'Siap Panen' : daysLeft + ' hr lagi'}) | Ukuran: ${u.metric} ${mUnit} | Status: ${u.statusNote || '-'}`;
-      pushLine(head, { bold: true, size: 9.5, gapAfter: 1 });
-      wrapPdfText(detail, 92).forEach(l => pushLine(l, { size: 9, color: '0.28 0.33 0.41', gapAfter: 2 }));
-      if (u.population) pushLine(`   Kapasitas/Ket: ${u.population}`, { size: 8.5, color: '0.39 0.45 0.55', gapAfter: 4 });
-    });
-  }
-
-  pushLine('', { gapAfter: 4 });
-  pushLine('3. JADWAL PERAWATAN KANTOR (SENIN-JUMAT)', { size: 11, bold: true, color: '0.02 0.47 0.34', gapAfter: 4 });
-  if (schedules.length === 0) {
-    pushLine('- Belum ada jadwal perawatan.', { gapAfter: 8 });
-  } else {
-    schedules.slice().sort((a, b) => String(a.time).localeCompare(String(b.time))).forEach(s => {
-      const status = s.done ? `[SELESAI${s.doneBy ? ' - ' + s.doneBy : ''}]` : '[BELUM]';
-      const line = `${status} ${s.time} WIB (${s.freq}) - ${s.title} (${s.unitName})`;
-      wrapPdfText(line, 92).forEach(l => pushLine(l, { size: 9, gapAfter: 2 }));
-    });
-  }
-
-  pushLine('', { gapAfter: 6 });
-  pushLine('4. RIWAYAT PANEN INTERNAL & CATATAN AI TERBARU', { size: 11, bold: true, color: '0.02 0.47 0.34', gapAfter: 4 });
-  harvests.slice(0, 6).forEach(h => {
-    pushLine(`- ${h.dateStr || '-'}: ${h.unitName} (${h.species}) - Umur ${h.ageDays} hr, ukuran ${h.metric} ${h.metricUnit || 'cm'}`, { size: 9, gapAfter: 2 });
-  });
-  journal.slice(0, 4).forEach(j => {
-    wrapPdfText(`* [${j.source || 'AI'} | ${j.dateStr || '-'}] ${j.title}: ${j.summary}`, 92).forEach(l => pushLine(l, { size: 8.8, color: '0.28 0.33 0.41', gapAfter: 2 }));
-  });
-
-  // Paginate into A4 pages (595 x 842 pt)
   const pages = [];
   let curOps = [];
-  let y = 795;
+  let y = 790;
+
   const startNewPage = () => {
     if (curOps.length > 0) pages.push(curOps.join('\n'));
     curOps = [];
-    y = 795;
+    y = 790;
   };
 
-  for (const item of docLines) {
-    const lineHeight = item.size + item.gapAfter + 2;
-    if (y - lineHeight < 52) startNewPage();
-    if (item.text) {
-      const font = item.bold ? '/F2' : '/F1';
-      curOps.push(`BT ${font} ${item.size} Tf ${item.color} rg 42 ${y.toFixed(1)} Td (${pdfEscape(item.text)}) Tj ET`);
-    }
-    y -= lineHeight;
-  }
+  // ==================== HALAMAN 1: KOP, KPI, DIAGRAM SIRKULAR & GRAFIK ====================
+  // Header Banner Page 1
+  curOps.push('q 0.02 0.47 0.34 rg 36 780 523 45 re f Q');
+  curOps.push('q 0.85 0.55 0.05 rg 36 776 523 3 re f Q');
+  curOps.push('BT /F2 14 Tf 1 1 1 rg 46 805 Td (AGROSYNC AI - LAPORAN DETAIL BUDIDAYA SIRKULAR) Tj ET');
+  curOps.push('BT /F1 9 Tf 0.9 0.95 0.95 rg 46 790 Td (Kapanewon Pengasih, Kabupaten Kulon Progo, D.I. Yogyakarta) Tj ET');
+
+  y = 755;
+  const statusHari = wd.isHoliday ? 'Libur Kantor (' + wd.reason + ')' : 'Hari Kerja Kantor';
+  curOps.push(`BT /F1 8.5 Tf 0.35 0.40 0.50 rg 42 ${y} Td (Tanggal Laporan: ${wd.dayName}, ${dateKey} (${timeKey} WIB) | Status: ${statusHari} | Sistem: Zero-Waste) Tj ET`);
+  y -= 20;
+
+  // 1. KPI Cards
+  curOps.push(`BT /F2 10.5 Tf 0.02 0.47 0.34 rg 42 ${y} Td (1. RINGKASAN EKSEKUTIF & INDIKATOR LINGKUNGAN SIRKULAR) Tj ET`);
+  y -= 12;
+
+  const pctDone = schedules.length > 0 ? Math.round((doneCount / schedules.length) * 100) : 100;
+  const kpis = [
+    { label: 'Unit Aktif', val: `${units.length} Unit`, sub: 'Realtime WIB' },
+    { label: 'Tugas Perawatan', val: `${doneCount}/${schedules.length}`, sub: `${pctDone}% Selesai` },
+    { label: 'Sampah Terolah', val: `${Number(eco.wasteKg || 0).toFixed(1)} kg`, sub: 'Biokonversi BSF' },
+    { label: 'Air Kolam Siram', val: `${Math.round(Number(eco.waterLiters || 0))} L`, sub: 'Daur Ulang Nutrisi' }
+  ];
+
+  const cardW = 124;
+  kpis.forEach((kpi, idx) => {
+    const cx = 42 + idx * (cardW + 8);
+    curOps.push(`q 0.97 0.98 0.99 rg 0.85 0.88 0.92 RG 0.8 w ${cx} ${y - 36} ${cardW} 38 re B Q`);
+    curOps.push(`q 0.05 0.59 0.41 rg ${cx} ${y - 2} ${cardW} 3 re f Q`);
+    curOps.push(`BT /F1 7.5 Tf 0.40 0.45 0.55 rg ${cx + 6} ${y - 12} Td (${pdfEscape(kpi.label)}) Tj ET`);
+    curOps.push(`BT /F2 11 Tf 0.05 0.15 0.25 rg ${cx + 6} ${y - 24} Td (${pdfEscape(kpi.val)}) Tj ET`);
+    curOps.push(`BT /F1 7 Tf 0.02 0.47 0.34 rg ${cx + 6} ${y - 33} Td (${pdfEscape(kpi.sub)}) Tj ET`);
+  });
+  y -= 52;
+
+  // 2. DIAGRAM SIRKULAR ZERO-WASTE
+  curOps.push(`BT /F2 10.5 Tf 0.02 0.47 0.34 rg 42 ${y} Td (2. DIAGRAM ALUR BUDIDAYA SIRKULAR TERPADU (ZERO-WASTE BIO-CYCLE)) Tj ET`);
+  y -= 12;
+
+  const dBoxY = y - 72;
+  curOps.push(`q 0.98 0.99 0.99 rg 0.80 0.85 0.90 RG 0.8 w 42 ${dBoxY} 520 72 re B Q`);
+  curOps.push(`q 0.05 0.59 0.41 rg 48 ${y - 10} 210 11 re f Q`);
+  curOps.push(`BT /F2 7 Tf 1 1 1 rg 52 ${y - 7} Td (SIKLUS BIOLOGIS TERTUTUP - KAPANEWON PENGASIH) Tj ET`);
+
+  // Diagram Nodes
+  // Node 1: Sampah Organik
+  curOps.push(`q 1 0.96 0.90 rg 0.85 0.55 0.05 RG 0.8 w 50 ${dBoxY + 36} 95 24 re B Q`);
+  curOps.push(`BT /F2 7.5 Tf 0.65 0.35 0 rg 54 ${dBoxY + 50} Td (1. SAMPAH ORGANIK) Tj ET`);
+  curOps.push(`BT /F1 6.5 Tf 0.3 0.3 0.3 rg 54 ${dBoxY + 41} Td (Sisa kantor Kapanewon) Tj ET`);
+
+  // Connector 1 -> 2
+  curOps.push(`q 0.55 0.60 0.65 RG 0.8 w 145 ${dBoxY + 48} m 175 ${dBoxY + 48} l S Q`);
+
+  // Node 2: Maggot BSF
+  curOps.push(`q 1 0.98 0.85 rg 0.80 0.60 0.05 RG 0.8 w 175 ${dBoxY + 36} 100 24 re B Q`);
+  curOps.push(`BT /F2 7.5 Tf 0.60 0.45 0 rg 179 ${dBoxY + 50} Td (2. BIOPOND MAGGOT BSF) Tj ET`);
+  curOps.push(`BT /F1 6.5 Tf 0.3 0.3 0.3 rg 179 ${dBoxY + 41} Td (Pengurai 2-3x bobot/hari) Tj ET`);
+
+  // Connector 2 -> 3a
+  curOps.push(`q 0.55 0.60 0.65 RG 0.8 w 275 ${dBoxY + 48} m 300 ${dBoxY + 48} l S Q`);
+
+  // Node 3a: Pakan Lele
+  curOps.push(`q 0.90 0.96 1 rg 0.1 0.5 0.8 RG 0.8 w 300 ${dBoxY + 36} 105 24 re B Q`);
+  curOps.push(`BT /F2 7.5 Tf 0.05 0.4 0.7 rg 304 ${dBoxY + 50} Td (3a. LARVA TINGGI PROTEIN) Tj ET`);
+  curOps.push(`BT /F1 6.5 Tf 0.3 0.3 0.3 rg 304 ${dBoxY + 41} Td (Protein 40-45% pemicu lele) Tj ET`);
+
+  // Connector 3a -> 4a
+  curOps.push(`q 0.55 0.60 0.65 RG 0.8 w 405 ${dBoxY + 48} m 425 ${dBoxY + 48} l S Q`);
+
+  // Node 4a: Kolam Lele
+  curOps.push(`q 0.88 0.97 1 rg 0.05 0.55 0.7 RG 0.8 w 425 ${dBoxY + 36} 130 24 re B Q`);
+  curOps.push(`BT /F2 7.5 Tf 0.05 0.4 0.6 rg 429 ${dBoxY + 50} Td (4a. KOLAM LELE BIOFLOK) Tj ET`);
+  curOps.push(`BT /F1 6.5 Tf 0.3 0.3 0.3 rg 429 ${dBoxY + 41} Td (Hemat pakan komersial 40%) Tj ET`);
+
+  // Connector 2 down to 3b
+  curOps.push(`q 0.55 0.60 0.65 RG 0.8 w 225 ${dBoxY + 36} m 225 ${dBoxY + 29} l S Q`);
+
+  // Node 3b: Pupuk Kasgot
+  curOps.push(`q 0.90 0.98 0.92 rg 0.1 0.65 0.3 RG 0.8 w 175 ${dBoxY + 7} 100 22 re B Q`);
+  curOps.push(`BT /F2 7.5 Tf 0.05 0.5 0.2 rg 179 ${dBoxY + 20} Td (3b. PUPUK ORGANIK KASGOT) Tj ET`);
+  curOps.push(`BT /F1 6.5 Tf 0.3 0.3 0.3 rg 179 ${dBoxY + 11} Td (Kaya hara makro/mikro tanah) Tj ET`);
+
+  // Connector 3b -> 4b
+  curOps.push(`q 0.55 0.60 0.65 RG 0.8 w 275 ${dBoxY + 18} m 300 ${dBoxY + 18} l S Q`);
+
+  // Node 4b: Kebun Sayur
+  curOps.push(`q 0.88 0.97 0.90 rg 0.05 0.55 0.25 RG 0.8 w 300 ${dBoxY + 7} 255 22 re B Q`);
+  curOps.push(`BT /F2 7.5 Tf 0.05 0.45 0.2 rg 304 ${dBoxY + 20} Td (4b. KEBUN SAYUR TERPADU (Cabai, Terong, Sawi, Bayam)) Tj ET`);
+  curOps.push(`BT /F1 6.5 Tf 0.3 0.3 0.3 rg 304 ${dBoxY + 11} Td (Dipupuk kasgot & disiram air kolam lele kaya nitrat (Daur Ulang Hidrologi)) Tj ET`);
+
+  // Daur ulang air line
+  curOps.push(`q 0.08 0.55 0.70 RG 0.8 w 490 ${dBoxY + 36} m 490 ${dBoxY + 29} l S Q`);
+
+  y = dBoxY - 14;
+
+  // 3. GRAFIK KESIAPAN PANEN PER UNIT (HORIZONTAL VECTOR BARS)
+  curOps.push(`BT /F2 10.5 Tf 0.02 0.47 0.34 rg 42 ${y} Td (3. GRAFIK TINGKAT KESIAPAN PANEN PER UNIT BUDIDAYA (% PROGRES)) Tj ET`);
+  y -= 14;
+
+  units.forEach((u) => {
+    const target = Math.max(1, u.targetDays || 30);
+    const age = Math.max(0, u.ageDays || 0);
+    const pct = Math.min(100, Math.round((age / target) * 100));
+    const mUnit = u.category === 'maggot' ? 'mm' : 'cm';
+
+    // Unit label
+    curOps.push(`BT /F2 8.5 Tf 0.15 0.20 0.28 rg 42 ${y + 2} Td (${pdfEscape(u.name)} [${u.category.toUpperCase()}]) Tj ET`);
+    curOps.push(`BT /F1 7.5 Tf 0.40 0.45 0.55 rg 42 ${y - 8} Td (Umur: ${age}/${target} hr | Ukuran: ${u.metric} ${mUnit}) Tj ET`);
+
+    // Bar track
+    const barX = 220;
+    const barW = 260;
+    const barH = 11;
+    curOps.push(`q 0.92 0.94 0.96 rg ${barX} ${y - 6} ${barW} ${barH} re f Q`);
+
+    // Bar fill
+    let colorRg = '0.05 0.59 0.41'; // green
+    if (u.category === 'ternak') colorRg = '0.08 0.55 0.70'; // cyan
+    if (u.category === 'maggot') colorRg = '0.85 0.55 0.05'; // amber
+
+    const fillW = Math.max(3, Math.round((barW * pct) / 100));
+    curOps.push(`q ${colorRg} rg ${barX} ${y - 6} ${fillW} ${barH} re f Q`);
+
+    // Percentage text
+    curOps.push(`BT /F2 8 Tf 0.1 0.15 0.2 rg ${barX + barW + 10} ${y - 4} Td (${pct}%) Tj ET`);
+    const statusTxt = pct >= 100 ? 'Siap Panen' : `${Math.max(0, target - age)} hr lagi`;
+    curOps.push(`BT /F1 7 Tf 0.35 0.40 0.50 rg ${barX + barW + 42} ${y - 4} Td (${statusTxt}) Tj ET`);
+
+    y -= 24;
+  });
+
+  // End of Page 1 -> Next Page
+  startNewPage();
+
+  // ==================== HALAMAN 2: EVALUASI DETAIL UNIT & JADWAL TIM ====================
+  curOps.push('q 0.02 0.47 0.34 rg 36 784 523 38 re f Q');
+  curOps.push('q 0.85 0.55 0.05 rg 36 781 523 3 re f Q');
+  curOps.push('BT /F2 12 Tf 1 1 1 rg 46 802 Td (4. EVALUASI DETAIL PERKEMBANGAN UNIT VS STANDAR ACUAN RESMI) Tj ET');
+  curOps.push('BT /F1 8.5 Tf 0.9 0.95 0.95 rg 46 790 Td (Rujukan: SPO Budidaya KKP, PPID KKP (BSF), PIAT UGM, & BRMP Pertanian Banten) Tj ET');
+
+  y = 755;
+
+  // Table header
+  curOps.push(`q 0.05 0.59 0.41 rg 42 ${y} 520 16 re f Q`);
+  curOps.push(`BT /F2 7.5 Tf 1 1 1 rg 46 ${y + 5} Td (No) Tj ET`);
+  curOps.push(`BT /F2 7.5 Tf 1 1 1 rg 66 ${y + 5} Td (Nama Unit & Spesies) Tj ET`);
+  curOps.push(`BT /F2 7.5 Tf 1 1 1 rg 210 ${y + 5} Td (Umur / Target) Tj ET`);
+  curOps.push(`BT /F2 7.5 Tf 1 1 1 rg 290 ${y + 5} Td (Ukuran Saat Ini) Tj ET`);
+  curOps.push(`BT /F2 7.5 Tf 1 1 1 rg 380 ${y + 5} Td (Status / Kondisi) Tj ET`);
+  curOps.push(`BT /F2 7.5 Tf 1 1 1 rg 480 ${y + 5} Td (Kesiapan) Tj ET`);
+  y -= 16;
+
+  units.forEach((u, idx) => {
+    const bg = idx % 2 === 0 ? '0.98 0.99 1' : '1 1 1';
+    curOps.push(`q ${bg} rg 42 ${y - 2} 520 18 re f Q`);
+    curOps.push(`q 0.90 0.92 0.94 RG 0.5 w 42 ${y - 2} 520 18 re S Q`);
+
+    const target = Math.max(1, u.targetDays || 30);
+    const age = Math.max(0, u.ageDays || 0);
+    const pct = Math.min(100, Math.round((age / target) * 100));
+    const mUnit = u.category === 'maggot' ? 'mm' : 'cm';
+
+    curOps.push(`BT /F1 7.5 Tf 0.1 0.1 0.1 rg 46 ${y + 4} Td (${idx + 1}) Tj ET`);
+    curOps.push(`BT /F2 7.5 Tf 0.1 0.1 0.1 rg 66 ${y + 4} Td (${pdfEscape(u.name.slice(0, 24))}) Tj ET`);
+    curOps.push(`BT /F1 7.5 Tf 0.3 0.3 0.3 rg 210 ${y + 4} Td (Hr ${age}/${target}) Tj ET`);
+    curOps.push(`BT /F2 7.5 Tf 0.1 0.4 0.2 rg 290 ${y + 4} Td (${u.metric} ${mUnit}) Tj ET`);
+    curOps.push(`BT /F1 7 Tf 0.2 0.3 0.4 rg 380 ${y + 4} Td (${pdfEscape((u.statusNote || 'Kondisi Baik').slice(0, 20))}) Tj ET`);
+    curOps.push(`BT /F2 7.5 Tf 0.05 0.5 0.3 rg 480 ${y + 4} Td (${pct}% (${pct >= 100 ? 'Panen' : 'Tumbuh'})) Tj ET`);
+
+    y -= 18;
+  });
+
+  y -= 28;
+  // 5. SCHEDULES RECAP TABLE
+  curOps.push(`BT /F2 10.5 Tf 0.02 0.47 0.34 rg 42 ${y} Td (5. REKAPITULASI JADWAL PERAWATAN & TIM KERJA) Tj ET`);
+  y -= 22;
+
+  curOps.push(`q 0.08 0.55 0.70 rg 42 ${y} 520 16 re f Q`);
+  curOps.push(`BT /F2 7.5 Tf 1 1 1 rg 46 ${y + 5} Td (Jam WIB) Tj ET`);
+  curOps.push(`BT /F2 7.5 Tf 1 1 1 rg 100 ${y + 5} Td (Unit Sasaran) Tj ET`);
+  curOps.push(`BT /F2 7.5 Tf 1 1 1 rg 210 ${y + 5} Td (Aktivitas Perawatan) Tj ET`);
+  curOps.push(`BT /F2 7.5 Tf 1 1 1 rg 380 ${y + 5} Td (Frekuensi) Tj ET`);
+  curOps.push(`BT /F2 7.5 Tf 1 1 1 rg 460 ${y + 5} Td (Status / Pelaksana) Tj ET`);
+  y -= 16;
+
+  schedules.slice(0, 11).forEach((s, idx) => {
+    const bg = idx % 2 === 0 ? '0.98 0.99 1' : '1 1 1';
+    curOps.push(`q ${bg} rg 42 ${y - 2} 520 16 re f Q`);
+    curOps.push(`q 0.90 0.92 0.94 RG 0.5 w 42 ${y - 2} 520 16 re S Q`);
+
+    const statusTxt = s.done ? `Selesai (${pdfEscape(s.doneBy || 'Tim')})` : 'Belum Dikerjakan';
+    curOps.push(`BT /F2 7 Tf 0.1 0.1 0.1 rg 46 ${y + 4} Td (${s.time}) Tj ET`);
+    curOps.push(`BT /F1 7 Tf 0.2 0.2 0.2 rg 100 ${y + 4} Td (${pdfEscape(s.unitName.slice(0, 18))}) Tj ET`);
+    curOps.push(`BT /F1 7 Tf 0.1 0.1 0.1 rg 210 ${y + 4} Td (${pdfEscape(s.title.slice(0, 30))}) Tj ET`);
+    curOps.push(`BT /F1 7 Tf 0.4 0.4 0.4 rg 380 ${y + 4} Td (${pdfEscape(s.freq)}) Tj ET`);
+    curOps.push(`BT /F2 7 Tf ${s.done ? '0.05 0.5 0.2' : '0.7 0.2 0.1'} rg 460 ${y + 4} Td (${statusTxt}) Tj ET`);
+
+    y -= 16;
+  });
+
+  y -= 22;
+
+  // SIGNATURE BLOCK
+  curOps.push(`q 0.98 0.99 0.99 rg 0.85 0.88 0.92 RG 0.8 w 330 ${y - 65} 230 65 re B Q`);
+  curOps.push(`BT /F1 7.5 Tf 0.3 0.35 0.4 rg 345 ${y - 12} Td (Kapanewon Pengasih, Kabupaten Kulon Progo) Tj ET`);
+  curOps.push(`BT /F2 7.5 Tf 0.1 0.15 0.2 rg 345 ${y - 22} Td (Pengelola Budidaya Sirkular AgroSync AI) Tj ET`);
+  curOps.push(`BT /F2 8.5 Tf 0.05 0.45 0.3 rg 345 ${y - 48} Td (Fajar Wahyudi, S.Psi) Tj ET`);
+  curOps.push(`BT /F1 7 Tf 0.4 0.45 0.5 rg 345 ${y - 58} Td (Dokumen Resmi Sistem Budidaya Mandiri) Tj ET`);
+
   if (curOps.length > 0) pages.push(curOps.join('\n'));
-  if (pages.length === 0) pages.push('BT /F1 11 Tf 42 780 Td (Laporan AgroSync AI) Tj ET');
 
   // Assemble PDF 1.4 objects
   const objects = [];
@@ -490,7 +635,7 @@ function buildAgroSyncPdfBuffer(st) {
   const pagesObjId = pagesObjPlaceholderIdx + 1;
 
   pages.forEach((streamText, pIdx) => {
-    const footer = `\nBT /F1 8 Tf 0.45 0.50 0.58 rg 42 28 Td (AgroSync AI - Kapanewon Pengasih | Halaman ${pIdx + 1} dari ${pages.length}) Tj ET`;
+    const footer = `\nBT /F1 8 Tf 0.45 0.50 0.58 rg 42 24 Td (AgroSync AI - Kapanewon Pengasih | Halaman ${pIdx + 1} dari ${pages.length}) Tj ET`;
     const fullStream = streamText + footer;
     const contentId = addObj(`<< /Length ${Buffer.byteLength(fullStream, 'utf8')} >>\nstream\n${fullStream}\nendstream`);
     const pageId = addObj(`<< /Type /Page /Parent ${pagesObjId} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontRegularId} 0 R /F2 ${fontBoldId} 0 R >> >> /Contents ${contentId} 0 R >>`);

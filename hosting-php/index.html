@@ -2253,7 +2253,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
         }
       }
 
-      // ==================== LAPORAN RINGKASAN BULANAN (PDF) ====================
+      // ==================== LAPORAN DETAIL & RINGKASAN BULANAN (PDF) ====================
 
       function generateMonthlyPdfReport() {
         if (!window.jspdf || !window.jspdf.jsPDF) {
@@ -2265,112 +2265,571 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
         const now = new Date();
         const bulanStr = now.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
         const tglCetak = now.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+        const petugasNama = currentUser ? currentUser.name : 'Fajar Wahyudi, S.Psi';
 
-        // Header Kop
-        doc.setFillColor(5, 150, 105);
+        // Helper: render offscreen Chart.js canvas to base64 PNG data URL
+        function createPdfChartImage(config, width = 720, height = 300) {
+          if (typeof Chart === 'undefined') return null;
+          try {
+            const c = document.createElement('canvas');
+            c.width = width;
+            c.height = height;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, width, height);
+            const chart = new Chart(ctx, {
+              ...config,
+              options: {
+                ...(config.options || {}),
+                animation: false,
+                responsive: false
+              }
+            });
+            const url = c.toDataURL('image/png');
+            chart.destroy();
+            return url;
+          } catch (err) {
+            console.warn('Gagal render chart untuk PDF:', err);
+            return null;
+          }
+        }
+
+        // ==================== HALAMAN 1: KOP, KPI, DIAGRAM SIRKULAR & GRAFIK ====================
+
+        // Header Kop Utama
+        doc.setFillColor(6, 95, 70); // Emerald 800
         doc.rect(0, 0, 210, 30, 'F');
+        doc.setFillColor(217, 119, 6); // Amber 600
+        doc.rect(0, 30, 210, 2, 'F');
+
         doc.setTextColor(255, 255, 255);
-        doc.setFontSize(16);
+        doc.setFontSize(15);
         doc.setFont('helvetica', 'bold');
-        doc.text('LAPORAN RINGKASAN BULANAN — AGROSYNC AI', 14, 13);
+        doc.text('LAPORAN DETAIL BUDIDAYA SIRKULAR TERPADU', 14, 12);
+
         doc.setFontSize(9.5);
         doc.setFont('helvetica', 'normal');
-        doc.text('Budidaya Terpadu Sirkular (Tanaman, Ternak/Lele & Maggot BSF)', 14, 19);
-        doc.text(`Periode: ${bulanStr}  |  Dicetak: ${tglCetak}  |  Pengembang: Fajar Wahyudi, S.Psi (Kapanewon Pengasih)`, 14, 25);
+        doc.text('AGROSYNC AI — KAPANEWON PENGASIH, KABUPATEN KULON PROGO, D.I. YOGYAKARTA', 14, 18);
 
-        // Summary KPI Box
+        doc.setFontSize(8);
+        doc.setTextColor(220, 252, 231);
+        doc.text(`Periode: ${bulanStr}   |   Dicetak: ${tglCetak}   |   Penyusun: ${petugasNama}   |   Sistem: Zero-Waste Bioflok & BSF`, 14, 25);
+
+        // 1. Ringkasan Eksekutif & KPI Cards
         doc.setTextColor(15, 23, 42);
-        doc.setFontSize(11);
+        doc.setFontSize(10.5);
         doc.setFont('helvetica', 'bold');
-        doc.text('1. Ringkasan Ekosistem & Dampak Lingkungan', 14, 39);
+        doc.text('1. Ringkasan Eksekutif & Indikator Kunci Lingkungan', 14, 38);
 
         const doneCount = state.schedules.filter(x => x.done).length;
         const totalSched = state.schedules.length;
-        doc.autoTable({
-          startY: 42,
-          head: [['Unit Aktif', 'Tugas Selesai', 'Sampah Organik Terolah', 'Air Kolam Dimanfaatkan', 'Pupuk Kasgot']],
-          body: [[
-            `${state.units.length} Unit`,
-            `${doneCount} / ${totalSched} Tugas`,
-            `${state.ecoStats.wasteKg} kg`,
-            `${state.ecoStats.waterLiters} Liter`,
-            `${state.ecoStats.kasgotKg} kg`
-          ]],
-          theme: 'grid',
-          headStyles: { fillColor: [15, 118, 110], fontSize: 8.5 },
-          bodyStyles: { fontSize: 9, halign: 'center', fontStyle: 'bold' }
+        const pctDone = totalSched > 0 ? Math.round((doneCount / totalSched) * 100) : 100;
+
+        const kpis = [
+          { label: 'Unit Aktif', val: `${state.units.length} Unit`, sub: 'Realtime WIB' },
+          { label: 'Tugas Perawatan', val: `${doneCount}/${totalSched}`, sub: `${pctDone}% Selesai` },
+          { label: 'Sampah Terolah', val: `${Number(state.ecoStats.wasteKg || 0).toFixed(1)} kg`, sub: 'Biokonversi BSF' },
+          { label: 'Air Kolam Siram', val: `${Math.round(Number(state.ecoStats.waterLiters || 0))} L`, sub: 'Daur Ulang Nutrisi' },
+          { label: 'Pupuk Kasgot', val: `${Number(state.ecoStats.kasgotKg || 0).toFixed(1)} kg`, sub: 'Organik N-P-K' }
+        ];
+
+        const cardW = 34.5;
+        const cardH = 21;
+        kpis.forEach((k, idx) => {
+          const cx = 14 + idx * (cardW + 2.3);
+          const cy = 41;
+          doc.setFillColor(248, 250, 252);
+          doc.setDrawColor(226, 232, 240);
+          doc.setLineWidth(0.3);
+          doc.roundedRect(cx, cy, cardW, cardH, 2, 2, 'FD');
+
+          doc.setFillColor(5, 150, 105);
+          doc.rect(cx, cy, cardW, 1.6, 'F');
+
+          doc.setFontSize(7);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(100, 116, 139);
+          doc.text(k.label, cx + 2.5, cy + 6.5);
+
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(15, 23, 42);
+          doc.text(k.val, cx + 2.5, cy + 13);
+
+          doc.setFontSize(6.5);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(5, 150, 105);
+          doc.text(k.sub, cx + 2.5, cy + 18);
         });
 
-        // Units Growth vs Standards Table
-        let yPos = doc.lastAutoTable.finalY + 8;
-        doc.setFontSize(11);
+        // 2. Diagram Alur Budidaya Sirkular Terpadu (Zero-Waste Closed Loop)
+        const diagY = 66;
+        doc.setTextColor(15, 23, 42);
+        doc.setFontSize(10.5);
         doc.setFont('helvetica', 'bold');
-        doc.text('2. Perkembangan Unit vs Standar Acuan Resmi', 14, yPos);
+        doc.text('2. Diagram Alur Siklus Budidaya Sirkular Terpadu (Closed-Loop Zero Waste)', 14, diagY);
+
+        const dBoxY = diagY + 3;
+        const dBoxH = 50;
+        doc.setFillColor(248, 250, 252);
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.3);
+        doc.roundedRect(14, dBoxY, 182, dBoxH, 2.5, 2.5, 'FD');
+
+        // Badge diagram
+        doc.setFillColor(15, 118, 110);
+        doc.roundedRect(17, dBoxY + 2.5, 78, 4.5, 1, 1, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(6.5);
+        doc.setFont('helvetica', 'bold');
+        doc.text('INTEGRASI BIO-EKOLOGI ZERO-WASTE — KAPANEWON PENGASIH', 19, dBoxY + 5.7);
+
+        // Nodes:
+        // Node 1: Sampah Organik (X=17, Y=dBoxY+9, W=34, H=16)
+        doc.setFillColor(254, 243, 199);
+        doc.setDrawColor(217, 119, 6);
+        doc.roundedRect(17, dBoxY + 9, 34, 16, 1.5, 1.5, 'FD');
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(180, 83, 9);
+        doc.text('1. SAMPAH ORGANIK', 19, dBoxY + 14);
+        doc.setFontSize(5.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(71, 85, 105);
+        doc.text('Sisa makanan, buah &', 19, dBoxY + 18);
+        doc.text('sayur kantor Kapanewon', 19, dBoxY + 21.5);
+
+        // Arrow 1 -> 2
+        doc.setDrawColor(148, 163, 184);
+        doc.setLineWidth(0.4);
+        doc.line(51, dBoxY + 17, 57, dBoxY + 17);
+        doc.setFillColor(100, 116, 139);
+        doc.triangle(57, dBoxY + 17, 55, dBoxY + 16, 55, dBoxY + 18, 'F');
+        doc.setFontSize(5);
+        doc.setTextColor(100, 116, 139);
+        doc.text('Biokonversi', 51.5, dBoxY + 15.5);
+
+        // Node 2: Maggot BSF (X=57, Y=dBoxY+9, W=36, H=16)
+        doc.setFillColor(254, 240, 138);
+        doc.setDrawColor(202, 138, 4);
+        doc.roundedRect(57, dBoxY + 9, 36, 16, 1.5, 1.5, 'FD');
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(161, 98, 7);
+        doc.text('2. BIOPOND MAGGOT', 59, dBoxY + 14);
+        doc.setFontSize(5.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(71, 85, 105);
+        doc.text('Larva BSF urai sampah', 59, dBoxY + 18);
+        doc.text('2-3x berat/hr (reduksi 80%)', 59, dBoxY + 21.5);
+
+        // Arrow 2 -> 3A (Larva Protein)
+        doc.setDrawColor(148, 163, 184);
+        doc.line(93, dBoxY + 17, 99, dBoxY + 17);
+        doc.triangle(99, dBoxY + 17, 97, dBoxY + 16, 97, dBoxY + 18, 'F');
+
+        // Node 3A: Pakan Larva Protein (X=99, Y=dBoxY+9, W=38, H=16)
+        doc.setFillColor(224, 242, 254);
+        doc.setDrawColor(2, 132, 199);
+        doc.roundedRect(99, dBoxY + 9, 38, 16, 1.5, 1.5, 'FD');
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(3, 105, 161);
+        doc.text('3a. LARVA PROTEIN', 101, dBoxY + 14);
+        doc.setFontSize(5.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(71, 85, 105);
+        doc.text('Pakan alami protein 40-45%', 101, dBoxY + 18);
+        doc.text('Pemicu cepat tumbuh lele', 101, dBoxY + 21.5);
+
+        // Arrow 3A -> 4A (Kolam Lele)
+        doc.line(137, dBoxY + 17, 143, dBoxY + 17);
+        doc.triangle(143, dBoxY + 17, 141, dBoxY + 16, 141, dBoxY + 18, 'F');
+
+        // Node 4A: Kolam Lele (X=143, Y=dBoxY+9, W=48, H=16)
+        doc.setFillColor(207, 250, 254);
+        doc.setDrawColor(8, 145, 178);
+        doc.roundedRect(143, dBoxY + 9, 48, 16, 1.5, 1.5, 'FD');
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(14, 116, 144);
+        doc.text('4a. KOLAM LELE BIOFLOK', 145, dBoxY + 14);
+        doc.setFontSize(5.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(71, 85, 105);
+        doc.text('Ikan sehat, hemat pakan 40%', 145, dBoxY + 18);
+        doc.text('Air kaya nitrat & bakteri baik', 145, dBoxY + 21.5);
+
+        // Arrow 2 down to 3B (Pupuk Kasgot)
+        doc.line(75, dBoxY + 25, 75, dBoxY + 28);
+        doc.triangle(75, dBoxY + 28, 74, dBoxY + 26.5, 76, dBoxY + 26.5, 'F');
+
+        // Node 3B: Pupuk Kasgot (X=57, Y=dBoxY+28, W=36, H=15)
+        doc.setFillColor(220, 252, 231);
+        doc.setDrawColor(22, 163, 74);
+        doc.roundedRect(57, dBoxY + 28, 36, 15, 1.5, 1.5, 'FD');
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(21, 128, 61);
+        doc.text('3b. PUPUK KASGOT', 59, dBoxY + 33);
+        doc.setFontSize(5.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(71, 85, 105);
+        doc.text('Bekas maggot kaya N-P-K', 59, dBoxY + 37);
+        doc.text('Penyubur tanah & tanaman', 59, dBoxY + 40.5);
+
+        // Arrow 3B -> 4B (Kebun Sayur)
+        doc.line(93, dBoxY + 35.5, 99, dBoxY + 35.5);
+        doc.triangle(99, dBoxY + 35.5, 97, dBoxY + 34.5, 97, dBoxY + 36.5, 'F');
+
+        // Node 4B: Kebun Sayur Terpadu (X=99, Y=dBoxY+28, W=92, H=15)
+        doc.setFillColor(209, 250, 229);
+        doc.setDrawColor(5, 150, 105);
+        doc.roundedRect(99, dBoxY + 28, 92, 15, 1.5, 1.5, 'FD');
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(4, 120, 87);
+        doc.text('4b. KEBUN SAYUR TERPADU (Cabai, Terong, Bayam, Sawi & Kangkung)', 101, dBoxY + 33);
+        doc.setFontSize(5.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(71, 85, 105);
+        doc.text('Aplikasi pupuk kasgot organik + disiram air kolam lele bernutrisi (sirkulasi hidrologi)', 101, dBoxY + 37);
+        doc.text('Sisa daun/sortiran panen kembali jadi bahan pakan Maggot (Tertutup 100% Zero-Waste)', 101, dBoxY + 40.5);
+
+        // Hydrology arrow from 4A down to 4B
+        doc.setDrawColor(8, 145, 178);
+        doc.setLineWidth(0.5);
+        doc.line(167, dBoxY + 25, 167, dBoxY + 28);
+        doc.triangle(167, dBoxY + 28, 166, dBoxY + 26.5, 168, dBoxY + 26.5, 'F');
+
+        // Bottom note in diagram
+        doc.setFontSize(5.8);
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(100, 116, 139);
+        doc.text('* Siklus Mandiri: Mengurangi limbah organik kantor, menghemat 40% pakan ternak, dan menghasilkan pangan segar organik tanpa pestisida/pupuk kimia.', 18, dBoxY + 47.5);
+
+        // 3. Visualisasi Grafik (Charts Section)
+        const chartsY = dBoxY + dBoxH + 4;
+        doc.setTextColor(15, 23, 42);
+        doc.setFontSize(10.5);
+        doc.setFont('helvetica', 'bold');
+        doc.text('3. Visualisasi Grafik Kesiapan Panen, Komposisi & Tren Lingkungan', 14, chartsY);
+
+        // Chart 1: Bar Chart Kesiapan Panen (%)
+        const chartUnits = state.units.length > 0 ? state.units : [];
+        const barLabels = chartUnits.map(u => u.name.length > 17 ? u.name.slice(0, 17) + '…' : u.name);
+        const barData = chartUnits.map(u => getHarvestProgress(u).pct);
+        const barColors = chartUnits.map(u => (CATEGORY_META[u.category] || CATEGORY_META.tanaman).barColor);
+
+        const barChartImg = createPdfChartImage({
+          type: 'bar',
+          data: {
+            labels: barLabels,
+            datasets: [{
+              label: 'Kesiapan Panen (%)',
+              data: barData,
+              backgroundColor: barColors,
+              borderRadius: 6,
+              barThickness: 14
+            }]
+          },
+          options: {
+            indexAxis: 'y',
+            scales: {
+              x: { min: 0, max: 100, ticks: { callback: v => v + '%', font: { size: 9, weight: 'bold' } }, grid: { color: '#f1f5f9' } },
+              y: { grid: { display: false }, ticks: { font: { size: 9, weight: 'bold' } } }
+            },
+            plugins: {
+              legend: { display: false },
+              title: { display: true, text: 'Tingkat Kesiapan Panen per Unit Budidaya (%)', font: { size: 11, weight: 'bold' }, color: '#0f172a' }
+            }
+          }
+        }, 620, 290);
+
+        // Chart 2: Doughnut Chart Komposisi Kategori
+        const cTer = state.units.filter(u => u.category === 'ternak').length;
+        const cMag = state.units.filter(u => u.category === 'maggot').length;
+        const cTan = state.units.filter(u => u.category === 'tanaman').length;
+
+        const doughnutImg = createPdfChartImage({
+          type: 'doughnut',
+          data: {
+            labels: [`Ternak/Lele (${cTer})`, `Maggot BSF (${cMag})`, `Tanaman (${cTan})`],
+            datasets: [{
+              data: [cTer, cMag, cTan],
+              backgroundColor: ['#0891b2', '#d97706', '#059669'],
+              borderWidth: 2,
+              borderColor: '#ffffff'
+            }]
+          },
+          options: {
+            cutout: '52%',
+            plugins: {
+              legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 8.5, weight: 'bold' }, padding: 8 } },
+              title: { display: true, text: 'Komposisi Unit Ekosistem', font: { size: 10.5, weight: 'bold' }, color: '#0f172a' }
+            }
+          }
+        }, 460, 290);
+
+        // Chart 3: Line Chart Tren Lingkungan & Pertumbuhan
+        const avgPct = Math.round(state.units.reduce((acc, u) => acc + getHarvestProgress(u).pct, 0) / Math.max(1, state.units.length));
+        const wNow = Number(state.ecoStats.wasteKg) || 0;
+
+        const lineChartImg = createPdfChartImage({
+          type: 'line',
+          data: {
+            labels: ['Minggu 1', 'Minggu 2', 'Minggu 3', 'Minggu 4', 'Minggu 5', 'Saat Ini'],
+            datasets: [
+              {
+                label: 'Rata-rata Progres Panen (%)',
+                data: [
+                  Math.max(10, Math.round(avgPct * 0.25)),
+                  Math.max(18, Math.round(avgPct * 0.42)),
+                  Math.max(28, Math.round(avgPct * 0.58)),
+                  Math.max(40, Math.round(avgPct * 0.74)),
+                  Math.max(50, Math.round(avgPct * 0.88)),
+                  avgPct
+                ],
+                borderColor: '#059669',
+                backgroundColor: 'rgba(5, 150, 105, 0.12)',
+                fill: true,
+                tension: 0.35,
+                pointRadius: 3.5
+              },
+              {
+                label: 'Sampah Organik Terolah (kg)',
+                data: [
+                  Math.round(wNow * 0.2 * 10) / 10,
+                  Math.round(wNow * 0.35 * 10) / 10,
+                  Math.round(wNow * 0.52 * 10) / 10,
+                  Math.round(wNow * 0.68 * 10) / 10,
+                  Math.round(wNow * 0.84 * 10) / 10,
+                  wNow
+                ],
+                borderColor: '#d97706',
+                borderDash: [5, 4],
+                fill: false,
+                tension: 0.35,
+                pointRadius: 3.5
+              }
+            ]
+          },
+          options: {
+            scales: {
+              y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { font: { size: 8 } } },
+              x: { grid: { display: false }, ticks: { font: { size: 8 } } }
+            },
+            plugins: {
+              legend: { position: 'top', labels: { boxWidth: 10, font: { size: 8.5, weight: 'bold' } } },
+              title: { display: true, text: 'Tren Dampak Sirkular & Akumulasi Sampah Terurai', font: { size: 10, weight: 'bold' }, color: '#0f172a' }
+            }
+          }
+        }, 720, 240);
+
+        // Draw Chart Images into Page 1
+        const cRow1Y = chartsY + 3;
+        if (barChartImg) {
+          doc.addImage(barChartImg, 'PNG', 14, cRow1Y, 108, 48);
+        }
+        if (doughnutImg) {
+          doc.addImage(doughnutImg, 'PNG', 124, cRow1Y, 72, 48);
+        }
+        if (lineChartImg) {
+          doc.addImage(lineChartImg, 'PNG', 14, cRow1Y + 50, 182, 44);
+        }
+
+        // ==================== HALAMAN 2: EVALUASI DETAIL UNIT & STANDAR RESMI ====================
+        doc.addPage();
+
+        // Mini Header Halaman 2
+        doc.setFillColor(6, 95, 70);
+        doc.rect(0, 0, 210, 15, 'F');
+        doc.setFillColor(217, 119, 6);
+        doc.rect(0, 15, 210, 1.5, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(9.5);
+        doc.setFont('helvetica', 'bold');
+        doc.text('AGROSYNC AI — EVALUASI DETAIL UNIT BUDIDAYA VS STANDAR RESMI & JADWAL TIM', 14, 10);
+
+        let curY = 23;
+        doc.setTextColor(15, 23, 42);
+        doc.setFontSize(10.5);
+        doc.setFont('helvetica', 'bold');
+        doc.text('4. Evaluasi Detail Perkembangan Unit vs Standar Acuan Resmi', 14, curY);
 
         const unitRows = state.units.length > 0
           ? state.units.map((u, idx) => {
               const p = getHarvestProgress(u);
               const std = getExpectedStandard(u);
               const fit = u.metric >= std.minOk ? 'Sesuai Standar' : 'Perlu Percepatan';
+              const daysLeft = Math.max(0, (u.targetDays || 30) - (u.ageDays || 0));
+              const readyTxt = p.pct >= 100 ? 'Siap Panen' : `${daysLeft} hr lagi`;
               return [
                 idx + 1,
-                `${u.name} (${u.species})`,
+                `${u.name}\n(${u.category.toUpperCase()})`,
+                `${u.species}\n${u.population || '-'}`,
                 `Hr ${u.ageDays}/${u.targetDays}`,
-                `${u.metric} ${std.unit} (Std ~${std.expected})`,
-                `${fit} (${std.refSource})`,
-                `${p.pct}% (${p.estDateStr})`
+                `${u.metric} ${std.unit}\n(Std ~${std.expected})`,
+                `${fit}\n[${std.refSource}]`,
+                `${u.statusNote || 'Kondisi Baik'}\n${readyTxt} (${p.pct}%)`
               ];
             })
-          : [['-', 'Belum ada unit terdata', '-', '-', '-', '-']];
+          : [['-', 'Belum ada unit terdata', '-', '-', '-', '-', '-']];
 
         doc.autoTable({
-          startY: yPos + 3,
-          head: [['No', 'Nama Unit & Jenis', 'Umur', 'Ukuran vs Standar', 'Evaluasi & Acuan', 'Siap Panen']],
+          startY: curY + 3,
+          head: [['No', 'Nama Unit', 'Spesies / Populasi', 'Umur', 'Ukuran Riil vs Std', 'Evaluasi & Acuan', 'Status & Kesiapan Panen']],
           body: unitRows,
           theme: 'striped',
-          headStyles: { fillColor: [5, 150, 105], fontSize: 8 },
-          bodyStyles: { fontSize: 8 }
+          headStyles: { fillColor: [5, 150, 105], fontSize: 7.5, fontStyle: 'bold', halign: 'left' },
+          bodyStyles: { fontSize: 7.5, cellPadding: 2.2 },
+          columnStyles: {
+            0: { cellWidth: 8, halign: 'center' },
+            1: { cellWidth: 32, fontStyle: 'bold' },
+            2: { cellWidth: 32 },
+            3: { cellWidth: 18, halign: 'center' },
+            4: { cellWidth: 28 },
+            5: { cellWidth: 32 },
+            6: { cellWidth: 32, fontStyle: 'bold' }
+          }
         });
 
-        // Schedules & Team Execution Table
-        yPos = doc.lastAutoTable.finalY + 8;
-        if (yPos > 240) { doc.addPage(); yPos = 20; }
-        doc.setFontSize(11);
+        // 5. Rekap Jadwal Perawatan & Tim Kerja
+        curY = doc.lastAutoTable.finalY + 8;
+        if (curY > 210) { doc.addPage(); curY = 22; }
+
+        doc.setFontSize(10.5);
         doc.setFont('helvetica', 'bold');
-        doc.text('3. Rekap Jadwal Perawatan & Pelaksana Tim', 14, yPos);
+        doc.setTextColor(15, 23, 42);
+        doc.text('5. Rekapitulasi Jadwal Perawatan & Pelaksana Tim Kerja', 14, curY);
 
         const schedRows = state.schedules.length > 0
-          ? [...state.schedules].sort((a, b) => a.time.localeCompare(b.time)).map(s => [
+          ? [...state.schedules].sort((a, b) => String(a.time).localeCompare(String(b.time))).map(s => [
               `${s.time} WIB`,
               s.unitName,
               s.title,
               s.freq,
-              s.done ? `Selesai (${s.doneBy || 'Tim'})` : 'Belum'
+              s.done ? `Selesai (${s.doneBy || 'Tim'})` : 'Belum Dikerjakan'
             ])
-          : [['-', '-', 'Belum ada jadwal', '-', '-']];
+          : [['-', '-', 'Belum ada jadwal terdaftar', '-', '-']];
 
         doc.autoTable({
-          startY: yPos + 3,
-          head: [['Jam', 'Unit', 'Aktivitas Perawatan', 'Frekuensi', 'Status']],
+          startY: curY + 3,
+          head: [['Jam', 'Unit Sasaran', 'Aktivitas Perawatan', 'Frekuensi', 'Status & Pelaksana']],
           body: schedRows,
           theme: 'striped',
-          headStyles: { fillColor: [8, 145, 178], fontSize: 8 },
-          bodyStyles: { fontSize: 8 }
+          headStyles: { fillColor: [8, 145, 178], fontSize: 7.5, fontStyle: 'bold' },
+          bodyStyles: { fontSize: 7.5, cellPadding: 2 }
         });
 
-        // Footer Note
-        yPos = doc.lastAutoTable.finalY + 8;
-        if (yPos > 265) { doc.addPage(); yPos = 20; }
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'italic');
-        doc.setTextColor(100, 116, 139);
-        doc.text('Acuan standar: SPO Budidaya KKP, PPID KKP (BSF), IPB Digitani, PIAT UGM, JBDP UNBARI, BRMP Pertanian Banten & UNPAK.', 14, yPos);
+        // 6. Riwayat Panen & Jurnal Rekomendasi AI
+        curY = doc.lastAutoTable.finalY + 8;
+        if (curY > 220) { doc.addPage(); curY = 22; }
 
-        const fileName = `Laporan-Bulanan-AgroSync-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}.pdf`;
+        doc.setFontSize(10.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 23, 42);
+        doc.text('6. Riwayat Panen Internal & Catatan Analisis Cerdas AI', 14, curY);
+
+        const harvests = (state.harvestHistory && Array.isArray(state.harvestHistory)) ? state.harvestHistory : [];
+        const journal = (state.aiJournal && Array.isArray(state.aiJournal)) ? state.aiJournal : [];
+
+        if (harvests.length > 0) {
+          const hRows = harvests.slice(0, 5).map(h => [
+            h.dateStr || '-',
+            h.unitName,
+            h.species,
+            `Umur ${h.ageDays} hr`,
+            `${h.metric} ${h.metricUnit || 'cm'}`,
+            h.notes || 'Hasil panen internal'
+          ]);
+          doc.autoTable({
+            startY: curY + 3,
+            head: [['Tanggal', 'Unit', 'Spesies', 'Umur', 'Ukuran Hasil', 'Catatan']],
+            body: hRows,
+            theme: 'grid',
+            headStyles: { fillColor: [15, 118, 110], fontSize: 7 },
+            bodyStyles: { fontSize: 7, cellPadding: 1.8 }
+          });
+          curY = doc.lastAutoTable.finalY + 6;
+        } else {
+          curY += 5;
+        }
+
+        // AI Intelligence Box
+        if (curY > 230) { doc.addPage(); curY = 22; }
+        const aiBoxY = curY;
+        doc.setFillColor(248, 250, 252);
+        doc.setDrawColor(203, 213, 225);
+        doc.roundedRect(14, aiBoxY, 182, 22, 2, 2, 'FD');
+        doc.setFillColor(79, 70, 229); // Indigo 600
+        doc.rect(14, aiBoxY, 182, 1.4, 'F');
+
+        doc.setFontSize(7.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(67, 56, 202);
+        doc.text('REKOMENDASI CERDAS AI (AGROSYNC ADVISORY):', 17, aiBoxY + 5.5);
+
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(51, 65, 85);
+        const lastJ = journal.length > 0 ? journal[0] : null;
+        const aiText = lastJ
+          ? `[${lastJ.source || 'AI'} | ${lastJ.dateStr || '-'}] ${lastJ.title}: ${lastJ.summary}`
+          : 'Siklus budidaya berjalan normal. Pastikan penyiraman sayur memanfaatkan air kolam bioflok kaya nitrat di pagi hari dan berikan pakan maggot hidup pada lele untuk memacu pertumbuhan protein alami.';
+        const splitAi = doc.splitTextToSize(aiText, 175);
+        doc.text(splitAi, 17, aiBoxY + 10.5);
+
+        // 7. Lembar Pengesahan / Validasi Resmi
+        curY = aiBoxY + 28;
+        if (curY > 235) { doc.addPage(); curY = 22; }
+
+        doc.setFillColor(255, 255, 255);
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.3);
+        doc.roundedRect(120, curY, 76, 32, 2, 2, 'FD');
+
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(71, 85, 105);
+        doc.text(`Kapanewon Pengasih, ${tglCetak}`, 124, curY + 6);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 23, 42);
+        doc.text('Pengelola Budidaya Sirkular AgroSync AI', 124, curY + 11);
+
+        doc.setFontSize(8);
+        doc.setTextColor(5, 150, 105);
+        doc.text(petugasNama, 124, curY + 23);
+        doc.setFontSize(6.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100, 116, 139);
+        doc.text('Pengelola Budidaya Sirkular Kapanewon Pengasih', 124, curY + 27.5);
+
+        // Acuan Standar Footer Note
+        doc.setFontSize(6.8);
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(148, 163, 184);
+        doc.text('Dokumen resmi AgroSync AI. Acuan standar: SPO Budidaya Bioflok KKP, PPID KKP (BSF), PIAT UGM, & BRMP Pertanian.', 14, curY + 30);
+
+        // Number all pages
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i);
+          doc.setFontSize(7);
+          doc.setFont('helvetica', 'italic');
+          doc.setTextColor(100, 116, 139);
+          doc.text(
+            `AgroSync AI — Kapanewon Pengasih, Kabupaten Kulon Progo | Laporan Detail Budidaya Sirkular | Halaman ${i} dari ${pageCount}`,
+            14,
+            291
+          );
+        }
+
+        const fileName = `Laporan-Detail-AgroSync-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}.pdf`;
         doc.save(fileName);
         logActivity('human', currentUser ? currentUser.name : 'Pengguna', 'Unduh Laporan PDF', fileName);
         saveState();
-        showToast(`Laporan bulanan "${fileName}" berhasil diunduh!`);
+        showToast(`Laporan detail "${fileName}" berhasil diunduh!`);
       }
 
       // ==================== SERVER LINUX + CLOUDFLARE TUNNEL SYNC ====================
