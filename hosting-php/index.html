@@ -1510,7 +1510,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label for="schedTime" class="block text-xs font-semibold text-slate-700 mb-1">Jam Pelaksanaan</label>
-            <input type="time" id="schedTime" value="07:00" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm" />
+            <input type="time" id="schedTime" value="07:30" required class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm" />
           </div>
           <div>
             <label for="schedFreq" class="block text-xs font-semibold text-slate-700 mb-1">Frekuensi</label>
@@ -1764,6 +1764,22 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
         return { dateKey: key, dayName: dayNames[dow], isWeekend, isNationalHoliday: Boolean(holidayName), holidayName, isHoliday, reason, nextWorkdayLabel };
       }
 
+      function clampToOfficeHours(timeStr, defaultTime = '07:30') {
+        if (!timeStr || !/^\d{1,2}:\d{2}$/.test(String(timeStr).trim())) return defaultTime;
+        const parts = String(timeStr).trim().split(':');
+        let hr = parseInt(parts[0], 10);
+        let min = parseInt(parts[1], 10);
+        if (isNaN(hr) || isNaN(min)) return defaultTime;
+        let totalMin = hr * 60 + min;
+        const minLimit = 7 * 60 + 30; // 07:30 WIB (awal jam kerja dinas kantor)
+        const maxLimit = 16 * 60;     // 16:00 WIB (akhir jam kerja dinas kantor)
+        if (totalMin < minLimit) totalMin = minLimit;
+        else if (totalMin > maxLimit) totalMin = maxLimit;
+        const outHr = String(Math.floor(totalMin / 60)).padStart(2, '0');
+        const outMin = String(totalMin % 60).padStart(2, '0');
+        return `${outHr}:${outMin}`;
+      }
+
       function syncRealtimeUnitAges(st) {
         if (!st || !Array.isArray(st.units)) return false;
         const today = getTodayKey(0);
@@ -1786,6 +1802,17 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
         if (st.simDay !== realSimDay) {
           st.simDay = realSimDay;
           changed = true;
+        }
+        // Pastikan seluruh jadwal sesuai jam kerja kantor (07:30 - 16:00 WIB)
+        if (Array.isArray(st.schedules)) {
+          st.schedules.forEach(s => {
+            const clamped = clampToOfficeHours(s.time, '07:30');
+            if (s.time !== clamped) {
+              s.time = clamped;
+              changed = true;
+            }
+          });
+          if (changed) st.schedules.sort((a, b) => a.time.localeCompare(b.time));
         }
         // Reset daily schedule checkmarks automatically when a new working day begins
         if (st.lastActiveDateWib && st.lastActiveDateWib !== today) {
@@ -2782,7 +2809,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
               : unit.category === 'maggot'
                 ? 'Cacah pakan organik lebih halus dan jaga media tetap gembur.'
                 : 'Siram pakai air kolam ternak & tabur pupuk kasgot organik.',
-            suggestedTask: { time: '07:15', category: unit.category, unitId: unit.id, unitName: unit.name, title: `Evaluasi pakan/nutrisi ${unit.name} (kejar standar umur)`, freq: 'Harian' }
+            suggestedTask: { time: '07:30', category: unit.category, unitId: unit.id, unitName: unit.name, title: `Evaluasi pakan/nutrisi ${unit.name} (kejar standar umur)`, freq: 'Harian' }
           });
         }
 
@@ -2793,7 +2820,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
               severity: 'warn',
               title: `Kualitas air/kandang ${unit.name} menurun (${unit.visual1})`,
               detail: 'Kurangi pakan 20–30%, ganti 15% air dasar pagi/sore pakai air endapan 24 jam & beri probiotik.',
-              suggestedTask: { time: '07:30', category: 'ternak', unitId: unit.id, unitName: unit.name, title: 'Ganti air 15% (pakai siram tanaman), kurangi pakan 25% & probiotik', freq: '3 Hari Sekali' }
+              suggestedTask: { time: '08:30', category: 'ternak', unitId: unit.id, unitName: unit.name, title: 'Ganti air 15% (pakai siram tanaman), kurangi pakan 25% & probiotik', freq: '3 Hari Sekali' }
             });
           }
           if (unit.statusNote !== 'Sehat & Aktif') {
@@ -2802,7 +2829,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
               severity: 'danger',
               title: `Potensi Penyakit di ${unit.name}: ${unit.statusNote}`,
               detail: 'Pisahkan yang bergejala ke karantina, puasakan 6–12 jam bila lemas, dan tabur garam krosok untuk bintik putih/jamur.',
-              suggestedTask: { time: '07:00', category: 'ternak', unitId: unit.id, unitName: unit.name, title: `Penanganan (${unit.statusNote}): karantina & perawatan garam/air`, freq: 'Harian' }
+              suggestedTask: { time: '07:30', category: 'ternak', unitId: unit.id, unitName: unit.name, title: `Penanganan (${unit.statusNote}): karantina & perawatan garam/air`, freq: 'Harian' }
             });
           }
         } else if (unit.category === 'maggot') {
@@ -2822,7 +2849,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
               severity: 'warn',
               title: `Daun ${unit.name} menguning (kurang nutrisi)`,
               detail: 'Siram pakai air buangan kolam ternak & tabur pupuk kasgot organik.',
-              suggestedTask: { time: '06:30', category: 'tanaman', unitId: unit.id, unitName: unit.name, title: 'Siram air kolam ternak & beri pupuk kasgot', freq: '3 Hari Sekali' }
+              suggestedTask: { time: '07:30', category: 'tanaman', unitId: unit.id, unitName: unit.name, title: 'Siram air kolam ternak & beri pupuk kasgot', freq: '3 Hari Sekali' }
             });
           }
           if (unit.visual1.includes('Hama') || unit.statusNote.includes('Hama')) {
@@ -2831,7 +2858,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
               severity: 'danger',
               title: `Gejala Hama pada ${unit.name}`,
               detail: 'Pangkas daun rusak & semprot pestisida nabati sore hari.',
-              suggestedTask: { time: '17:00', category: 'tanaman', unitId: unit.id, unitName: unit.name, title: 'Pangkas daun rusak & semprot pestisida nabati', freq: '3 Hari Sekali' }
+              suggestedTask: { time: '15:30', category: 'tanaman', unitId: unit.id, unitName: unit.name, title: 'Pangkas daun rusak & semprot pestisida nabati', freq: '3 Hari Sekali' }
             });
           }
         }
@@ -2842,7 +2869,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
             severity: 'info',
             title: `${unit.name} mendekati/siap panen (${prog.daysLeft === 0 ? 'Hari Ini!' : prog.daysLeft + ' hari lagi'})`,
             detail: unit.category === 'ternak' ? 'Puasakan 24 jam sebelum panen.' : unit.category === 'maggot' ? 'Panen larva & ayak kasgot untuk tanaman.' : 'Panen pagi hari, sisakan pangkal tunas.',
-            suggestedTask: { time: '06:45', category: unit.category, unitId: unit.id, unitName: unit.name, title: `Persiapan panen ${unit.name} (${unit.species})`, freq: 'Sekali' }
+            suggestedTask: { time: '07:30', category: unit.category, unitId: unit.id, unitName: unit.name, title: `Persiapan panen ${unit.name} (${unit.species})`, freq: 'Sekali' }
           });
         }
         return { severity, issues };
@@ -2857,6 +2884,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
       }
 
       function addTaskIfNotDuplicate(taskObj) {
+        const timeVal = clampToOfficeHours(taskObj.time || '07:30');
         const exists = state.schedules.some(s =>
           s.unitName === taskObj.unitName &&
           s.title.toLowerCase() === taskObj.title.toLowerCase() &&
@@ -2865,7 +2893,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
         if (exists) return false;
         state.schedules.push({
           id: 's' + Date.now() + Math.floor(Math.random() * 1000),
-          time: taskObj.time || '07:00',
+          time: timeVal,
           category: taskObj.category || 'tanaman',
           unitId: taskObj.unitId || '',
           unitName: taskObj.unitName || 'Umum',
@@ -2899,7 +2927,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
           const res = await callConfiguredAi([
             {
               role: 'system',
-              content: 'Kamu asisten agronomi sirkular kantor (Kapanewon Pengasih, Senin-Jumat jam 07:30-16:00 WIB). ' + GROUNDED_AI_STANDARDS + ' ATURAN KANTOR: Jadwal piket HANYA untuk hari kerja (Senin-Jumat), TIDAK ada jadwal pada Sabtu, Minggu, atau Tanggal Merah Nasional (namun analisis evaluasi tetap berjalan setiap hari). Jawab HANYA JSON valid: {"summary":"ringkasan evaluasi standar umur & saran 2 kalimat","schedules":[{"time":"HH:MM","category":"ternak|maggot|tanaman","unitName":"nama unit","title":"aksi singkat sesuai standar","freq":"Harian|Mingguan|Bulanan|Sekali"}]}. Maksimal 8 jadwal prioritas jam kantor.'
+              content: 'Kamu asisten agronomi sirkular kantor (Kapanewon Pengasih, Senin-Jumat jam 07:30-16:00 WIB). ' + GROUNDED_AI_STANDARDS + ' ATURAN KANTOR & JAM KERJA: Jadwal piket HANYA untuk hari kerja (Senin-Jumat). TIDAK ada jadwal pada Sabtu, Minggu, atau Tanggal Merah Nasional. Seluruh waktu jadwal (time) WAJIB berada dalam rentang jam kerja kantor (07:30-16:00 WIB), dimulai paling awal pukul 07:30 WIB (DILARANG sebelum 07:30 atau setelah 16:00 WIB). Jawab HANYA JSON valid: {"summary":"ringkasan evaluasi standar umur & saran 2 kalimat","schedules":[{"time":"HH:MM","category":"ternak|maggot|tanaman","unitName":"nama unit","title":"aksi singkat sesuai standar","freq":"Harian|Mingguan|Bulanan|Sekali"}]}. Maksimal 8 jadwal prioritas jam kantor.'
             },
             {
               role: 'user',
@@ -2912,7 +2940,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
             if (parsed && Array.isArray(parsed.schedules)) {
               parsed.schedules.forEach(s => {
                 if (s && s.title && addTaskIfNotDuplicate({
-                  time: /^\d{2}:\d{2}$/.test(s.time) ? s.time : '07:00',
+                  time: clampToOfficeHours(s.time, '07:30'),
                   category: ['ternak', 'maggot', 'tanaman'].includes(s.category) ? s.category : 'tanaman',
                   unitId: '',
                   unitName: s.unitName || 'Umum',
@@ -2934,16 +2962,16 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
         if (!cloudUsed) {
           state.units.forEach(u => {
             if (u.category === 'tanaman') {
-              if (addTaskIfNotDuplicate({ time: '06:30', category: 'tanaman', unitId: u.id, unitName: u.name, title: `Siram pagi ${u.species} (manfaatkan air kolam jika ada)`, freq: 'Harian' })) added++;
-              if (addTaskIfNotDuplicate({ time: '16:30', category: 'tanaman', unitId: u.id, unitName: u.name, title: `Siram sore ${u.species} & cek daun`, freq: 'Harian' })) added++;
+              if (addTaskIfNotDuplicate({ time: '07:30', category: 'tanaman', unitId: u.id, unitName: u.name, title: `Siram pagi ${u.species} (manfaatkan air kolam jika ada)`, freq: 'Harian' })) added++;
+              if (addTaskIfNotDuplicate({ time: '15:30', category: 'tanaman', unitId: u.id, unitName: u.name, title: `Siram sore ${u.species} & cek daun`, freq: 'Harian' })) added++;
             } else if (u.category === 'ternak') {
-              if (addTaskIfNotDuplicate({ time: '07:00', category: 'ternak', unitId: u.id, unitName: u.name, title: `Pakan pagi ${u.species} (pelet + maggot) & cek respons makan`, freq: 'Harian' })) added++;
+              if (addTaskIfNotDuplicate({ time: '07:30', category: 'ternak', unitId: u.id, unitName: u.name, title: `Pakan pagi ${u.species} (pelet + maggot) & cek respons makan`, freq: 'Harian' })) added++;
               if (addTaskIfNotDuplicate({ time: '12:30', category: 'ternak', unitId: u.id, unitName: u.name, title: `Pakan siang ${u.species} & pantau kondisi visual air`, freq: 'Harian' })) added++;
-              if (addTaskIfNotDuplicate({ time: '17:00', category: 'ternak', unitId: u.id, unitName: u.name, title: `Pakan sore ${u.species} & cek potensi penyakit`, freq: 'Harian' })) added++;
-              if (addTaskIfNotDuplicate({ time: '07:30', category: 'ternak', unitId: u.id, unitName: u.name, title: `Ganti air 10–20% (${u.species}) air endapan 24 jam`, freq: '3 Hari Sekali' })) added++;
+              if (addTaskIfNotDuplicate({ time: '15:45', category: 'ternak', unitId: u.id, unitName: u.name, title: `Pakan sore ${u.species} & cek potensi penyakit`, freq: 'Harian' })) added++;
+              if (addTaskIfNotDuplicate({ time: '08:30', category: 'ternak', unitId: u.id, unitName: u.name, title: `Ganti air 10–20% (${u.species}) air endapan 24 jam`, freq: '3 Hari Sekali' })) added++;
             } else if (u.category === 'maggot') {
               if (addTaskIfNotDuplicate({ time: '08:00', category: 'maggot', unitId: u.id, unitName: u.name, title: `Beri sampah organik cacah ke ${u.species} & cek tekstur media`, freq: 'Harian' })) added++;
-              if (addTaskIfNotDuplicate({ time: '17:30', category: 'maggot', unitId: u.id, unitName: u.name, title: `Aduk media ringan ${u.species} & cek kesiapan panen`, freq: 'Harian' })) added++;
+              if (addTaskIfNotDuplicate({ time: '16:00', category: 'maggot', unitId: u.id, unitName: u.name, title: `Aduk media ringan ${u.species} & cek kesiapan panen`, freq: 'Harian' })) added++;
             }
           });
           getAllDiagnostics().forEach(d => {
@@ -3747,7 +3775,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
           { label: 'Malam (19:00 – 23:59)', items: [] }
         ];
         list.forEach(s => {
-          const hr = parseInt((s.time || '07:00').split(':')[0], 10);
+          const hr = parseInt((s.time || '07:30').split(':')[0], 10);
           if (hr < 11) groups[0].items.push(s);
           else if (hr < 15) groups[1].items.push(s);
           else if (hr < 19) groups[2].items.push(s);
@@ -4097,13 +4125,13 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
           diagnosis = checkedIds.includes('ter_bintik') ? 'Indikasi Bintik Putih / Jamur Air.' : 'Indikasi infeksi bakteri (kembung/luka).';
           treatment = 'Pisahkan ke karantina, kurangi pakan, ganti air 15% & tabur garam krosok 2–3x/hari.';
           unit.statusNote = checkedIds.includes('ter_bintik') ? 'Ada Bintik Putih / Jamur' : 'Perut Kembung / Luka';
-          suggestedTask = { time: '07:15', category: 'ternak', unitId: unit.id, unitName: unit.name, title: `Karantina & perawatan (${unit.statusNote})`, freq: 'Harian' };
+          suggestedTask = { time: '07:30', category: 'ternak', unitId: unit.id, unitName: unit.name, title: `Karantina & perawatan (${unit.statusNote})`, freq: 'Harian' };
         } else if (checkedIds.includes('ter_gantung') || checkedIds.includes('ter_airbau') || checkedIds.includes('ter_kumis')) {
           risk = 'warn';
           diagnosis = 'Kualitas air menurun / stres oksigen.';
           treatment = 'Puasakan 6–12 jam, ganti 15% air bertahap pakai air endapan 24 jam & beri probiotik.';
           unit.statusNote = 'Menggantung di Permukaan';
-          suggestedTask = { time: '07:30', category: 'ternak', unitId: unit.id, unitName: unit.name, title: 'Ganti air 15% (siram tanaman), puasa 12 jam & probiotik', freq: 'Sekali' };
+          suggestedTask = { time: '08:30', category: 'ternak', unitId: unit.id, unitName: unit.name, title: 'Ganti air 15% (siram tanaman), puasa 12 jam & probiotik', freq: 'Sekali' };
         } else if (checkedIds.includes('mag_becek') || checkedIds.includes('mag_kabur') || checkedIds.includes('mag_kering')) {
           risk = 'warn';
           diagnosis = checkedIds.includes('mag_becek') ? 'Media terlalu basah/berbau.' : checkedIds.includes('mag_kering') ? 'Media terlalu kering.' : 'Larva stres panas/basah.';
@@ -4115,13 +4143,13 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
           diagnosis = 'Gejala hama daun / jamur tanaman.';
           treatment = 'Pangkas daun rusak & semprot pestisida nabati sore hari.';
           unit.statusNote = 'Gejala Hama Daun / Kutu';
-          suggestedTask = { time: '17:00', category: 'tanaman', unitId: unit.id, unitName: unit.name, title: 'Pangkas daun rusak & semprot pestisida nabati', freq: '3 Hari Sekali' };
+          suggestedTask = { time: '15:30', category: 'tanaman', unitId: unit.id, unitName: unit.name, title: 'Pangkas daun rusak & semprot pestisida nabati', freq: '3 Hari Sekali' };
         } else if (checkedIds.includes('tan_kuning') || checkedIds.includes('tan_layu')) {
           risk = 'warn';
           diagnosis = checkedIds.includes('tan_kuning') ? 'Daun menguning (kurang nutrisi).' : 'Tanaman layu / kurang air.';
           treatment = 'Siram pakai air kolam ternak & tabur pupuk kasgot.';
           unit.statusNote = checkedIds.includes('tan_kuning') ? 'Kurang Nutrisi (Kuning)' : 'Layu / Kurang Siram';
-          suggestedTask = { time: '16:30', category: 'tanaman', unitId: unit.id, unitName: unit.name, title: 'Siram air kolam & tabur pupuk kasgot', freq: '3 Hari Sekali' };
+          suggestedTask = { time: '15:45', category: 'tanaman', unitId: unit.id, unitName: unit.name, title: 'Siram air kolam & tabur pupuk kasgot', freq: '3 Hari Sekali' };
         } else if (checkedIds.some(id => id.endsWith('_sehat'))) {
           unit.statusNote = (CATEGORY_META[unit.category] || CATEGORY_META.tanaman).statusOptions[0];
         }
@@ -4779,7 +4807,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
         document.getElementById('formAddSchedule').addEventListener('submit', e => {
           e.preventDefault();
           const unit = state.units.find(u => u.id === document.getElementById('schedUnit').value);
-          const time = document.getElementById('schedTime').value || '07:00';
+          const time = clampToOfficeHours(document.getElementById('schedTime').value || '07:30');
           const freq = document.getElementById('schedFreq').value;
           const title = document.getElementById('schedTitle').value.trim();
           if (!title) return;

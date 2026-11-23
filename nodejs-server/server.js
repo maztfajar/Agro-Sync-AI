@@ -115,6 +115,22 @@ function getIndonesiaWorkdayInfo(dateKeyInput) {
   return { dateKey: key, dayName: dayNames[dow], isWeekend, isNationalHoliday: Boolean(holidayName), holidayName, isHoliday, reason, nextWorkdayLabel };
 }
 
+function clampToOfficeHours(timeStr, defaultTime = '07:30') {
+  if (!timeStr || !/^\d{1,2}:\d{2}$/.test(String(timeStr).trim())) return defaultTime;
+  const parts = String(timeStr).trim().split(':');
+  let hr = parseInt(parts[0], 10);
+  let min = parseInt(parts[1], 10);
+  if (isNaN(hr) || isNaN(min)) return defaultTime;
+  let totalMin = hr * 60 + min;
+  const minLimit = 7 * 60 + 30; // 07:30 WIB (awal jam kerja dinas kantor)
+  const maxLimit = 16 * 60;     // 16:00 WIB (akhir jam kerja dinas kantor)
+  if (totalMin < minLimit) totalMin = minLimit;
+  else if (totalMin > maxLimit) totalMin = maxLimit;
+  const outHr = String(Math.floor(totalMin / 60)).padStart(2, '0');
+  const outMin = String(totalMin % 60).padStart(2, '0');
+  return `${outHr}:${outMin}`;
+}
+
 function syncRealtimeUnitAges(st) {
   if (!st || !Array.isArray(st.units)) return false;
   const today = getWibNow(0).dateKey;
@@ -136,6 +152,17 @@ function syncRealtimeUnitAges(st) {
   if (st.simDay !== realSimDay) {
     st.simDay = realSimDay;
     changed = true;
+  }
+  // Pastikan seluruh jadwal sesuai jam kerja kantor (07:30 - 16:00 WIB)
+  if (Array.isArray(st.schedules)) {
+    st.schedules.forEach(s => {
+      const clamped = clampToOfficeHours(s.time, '07:30');
+      if (s.time !== clamped) {
+        s.time = clamped;
+        changed = true;
+      }
+    });
+    if (changed) st.schedules.sort((a, b) => a.time.localeCompare(b.time));
   }
   if (st.lastActiveDateWib && st.lastActiveDateWib !== today) {
     const wd = getIndonesiaWorkdayInfo(today);
@@ -509,7 +536,7 @@ async function runScheduledJobs() {
           max_tokens: 450,
           temperature: 0.3,
           messages: [
-            { role: 'system', content: 'Asisten AgroSync AI Kapanewon Pengasih. ' + GROUNDED_AI_STANDARDS + ' ATURAN KANTOR: Jadwal piket HANYA Senin-Jumat (07:30-16:00 WIB), libur Sabtu/Minggu/Tanggal Merah. Balas HANYA JSON: {"summary":"ringkasan evaluasi 2 kalimat","schedules":[{"time":"HH:MM","category":"ternak|maggot|tanaman","unitName":"nama","title":"aksi","freq":"Harian|Mingguan|Bulanan|Sekali"}]}' },
+            { role: 'system', content: 'Asisten AgroSync AI Kapanewon Pengasih. ' + GROUNDED_AI_STANDARDS + ' ATURAN KANTOR & JAM KERJA: Jadwal piket HANYA Senin-Jumat jam kerja kantor (07:30-16:00 WIB), dimulai paling awal pukul 07:30 WIB dan paling akhir pukul 16:00 WIB (DILARANG sebelum 07:30 atau setelah 16:00 WIB). Libur Sabtu/Minggu/Tanggal Merah. Balas HANYA JSON: {"summary":"ringkasan evaluasi 2 kalimat","schedules":[{"time":"HH:MM","category":"ternak|maggot|tanaman","unitName":"nama","title":"aksi","freq":"Harian|Mingguan|Bulanan|Sekali"}]}' },
             { role: 'user', content: `Evaluasi harian ${wd.dayName} ${dateKey} (${wd.isHoliday ? 'HARI LIBUR KANTOR - jangan tambah jadwal baru, cukup evaluasi' : 'HARI KERJA KANTOR'}). Ekosistem Sirkular: sampah ${(state.ecoStats&&state.ecoStats.wasteKg)||0}kg, air kolam ${(state.ecoStats&&state.ecoStats.waterLiters)||0}L, kasgot ${(state.ecoStats&&state.ecoStats.kasgotKg)||0}kg. Unit: ${compactUnits}` }
           ]
         })
@@ -525,7 +552,7 @@ async function runScheduledJobs() {
             if (!dup && ns.title) {
               state.schedules.push({
                 id: 's' + Date.now() + Math.floor(Math.random() * 999),
-                time: /^\d{2}:\d{2}$/.test(ns.time) ? ns.time : '08:00',
+                time: clampToOfficeHours(ns.time, '07:30'),
                 category: ['ternak', 'maggot', 'tanaman'].includes(ns.category) ? ns.category : 'tanaman',
                 unitId: '', unitName: ns.unitName || 'Umum', title: ns.title, freq: ns.freq || 'Harian', done: false, aiGenerated: true
               });
@@ -793,15 +820,15 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiCfg.apiKey.trim() },
         body: JSON.stringify({
-          model: aiCfg.model || 'gpt-4o-mini',
-          max_tokens: 420,
+          model: aiCfg.model || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
+          max_tokens: 500,
           temperature: 0.25,
           messages: [
-            { role: 'system', content: 'Kamu ahli agronomi & akuakultur AgroSync AI. ' + GROUNDED_AI_STANDARDS + ' Analisis foto secara SANGAT CERMAT meskipun pengguna tidak menulis gejala apapun. Periksa tahap pertumbuhan, estimasi ukuran, warna daun/air/media, serta tanda hama/penyakit. Balas HANYA JSON valid: {"risk":"ok|warn|danger","unitId":"id unit paling cocok dari daftar atau kosong","unitName":"nama unit terkait","diagnosis":"analisis visual cermat 1-2 kalimat","treatment":"langkah penanganan praktis 1-2 kalimat","statusNote":"status singkat 2-4 kata untuk update unit","estimatedMetric":0,"taskTitle":"tugas hari kerja (Senin-Jumat) jika perlu atau kosong","taskTime":"HH:MM"}' },
+            { role: 'system', content: 'Kamu ahli agronomi & akuakultur AgroSync AI Kapanewon Pengasih. ' + GROUNDED_AI_STANDARDS + ' Analisis foto secara SANGAT CERMAT meskipun pengguna tidak menulis teks. Periksa apakah foto ini unit baru atau unit lama, jenis komoditas (lele/nila, maggot bsf, atau sayuran), tahap pertumbuhan, estimasi ukuran, dan tanda penyakit. Balas HANYA JSON valid: {"risk":"ok|warn|danger","isNewUnit":false,"category":"ternak|maggot|tanaman","species":"nama komoditas spesifik","unitId":"id unit jika cocok","unitName":"nama unit","population":"estimasi populasi","ageDays":10,"estimatedMetric":7.5,"diagnosis":"analisis visual cermat 1-2 kalimat","treatment":"langkah penanganan praktis 1-2 kalimat","statusNote":"status singkat 2-4 kata","taskTitle":"tugas jam kerja kantor 07:30-16:00 WIB jika perlu","taskTime":"07:30"}' },
             {
               role: 'user',
               content: [
-                { type: 'text', text: `Pengirim: ${senderName}. ${w} Ekosistem Sirkular: sampah ${(state.ecoStats&&state.ecoStats.wasteKg)||0}kg, air kolam ${(state.ecoStats&&state.ecoStats.waterLiters)||0}L, kasgot ${(state.ecoStats&&state.ecoStats.kasgotKg)||0}kg. Unit terpilih: ${targetUnit ? `${targetUnit.id}:${targetUnit.name} (${targetUnit.species}, Hr ${targetUnit.ageDays}, ukuran ${targetUnit.metric})` : 'Auto-deteksi'}. Daftar unit: ${unitsSummary || '-'}. Keterangan pengguna: ${caption || 'KOSONG - wajib analisis visual cermat dari foto saja'}` },
+                { type: 'text', text: `Pengirim: ${senderName}. ${w} Ekosistem Sirkular: sampah ${(state.ecoStats&&state.ecoStats.wasteKg)||0}kg, air kolam ${(state.ecoStats&&state.ecoStats.waterLiters)||0}L, kasgot ${(state.ecoStats&&state.ecoStats.kasgotKg)||0}kg. Unit terpilih: ${targetUnit ? `${targetUnit.id}:${targetUnit.name} (${targetUnit.species}, Hr ${targetUnit.ageDays}, ukuran ${targetUnit.metric})` : 'Auto-deteksi'}. Daftar unit saat ini: ${unitsSummary || 'KOSONG (belum ada unit tersimpan)'}. Keterangan pengguna: ${caption || 'KOSONG - wajib analisis visual cermat dari foto saja'}` },
                 { type: 'image_url', image_url: { url: dataUrl } }
               ]
             }
@@ -817,13 +844,14 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
         treatment = parsed.treatment || treatment;
         risk = ['ok', 'warn', 'danger'].includes(parsed.risk) ? parsed.risk : 'warn';
         taskTitle = parsed.taskTitle || '';
-        taskTime = /^\d{2}:\d{2}$/.test(parsed.taskTime || '') ? parsed.taskTime : '08:00';
+        taskTime = clampToOfficeHours(parsed.taskTime, '07:30');
         engine = 'AI Vision (TG)';
         tokens = (aiData.usage && aiData.usage.total_tokens) || 0;
 
-        const matchedUnit = targetUnit || (state.units || []).find(u => u.id === parsed.unitId || (parsed.unitName && u.name.toLowerCase().includes(String(parsed.unitName).toLowerCase())));
+        let matchedUnit = targetUnit || (state.units || []).find(u => u.id === parsed.unitId || (parsed.unitName && u.name.toLowerCase().includes(String(parsed.unitName).toLowerCase())));
         if (matchedUnit) {
           detectedUnitName = matchedUnit.name;
+          targetUnit = matchedUnit;
           if (parsed.statusNote && String(parsed.statusNote).trim()) {
             matchedUnit.statusNote = String(parsed.statusNote).trim().slice(0, 60);
             aiUpdatedUnitInfo = `Status -> "${matchedUnit.statusNote}"`;
@@ -836,6 +864,33 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
             if (matchedUnit.history.length > 12) matchedUnit.history.shift();
             const mU = matchedUnit.category === 'maggot' ? 'mm' : 'cm';
             aiUpdatedUnitInfo += (aiUpdatedUnitInfo ? ', ' : '') + `Ukuran -> ${est} ${mU}`;
+          }
+        } else {
+          // Jika belum ada unit tersimpan atau terdeteksi foto unit baru:
+          const shouldCreateNew = (!state.units || state.units.length === 0) || parsed.isNewUnit || /(tambah|baru|tebar|tanam|bibit|benih|kolam|biopond|bedeng|polybag)/i.test(caption);
+          if (shouldCreateNew) {
+            let cat = ['ternak', 'maggot', 'tanaman'].includes(parsed.category) ? parsed.category : 'tanaman';
+            if (/(lele|nila|ikan|kolam)/i.test(caption) || /(lele|nila|ikan)/i.test(parsed.species || '')) cat = 'ternak';
+            else if (/(maggot|bsf|larva|biopond)/i.test(caption) || /(maggot|bsf)/i.test(parsed.species || '')) cat = 'maggot';
+
+            const sp = parsed.species || (cat === 'ternak' ? 'Ikan Lele' : cat === 'maggot' ? 'Maggot BSF' : 'Cabai Rawit');
+            let uName = parsed.unitName || caption || (cat === 'ternak' ? 'Kolam Lele 1' : cat === 'maggot' ? 'Biopond Maggot 1' : 'Unit Tanaman 1');
+            uName = uName.slice(0, 40);
+            const pop = parsed.population || (cat === 'ternak' ? '200 ekor' : cat === 'maggot' ? '1 kg' : '10 polybag');
+            const estAge = Math.max(1, Math.round(Number(parsed.ageDays) || 7));
+            const estMetric = Math.max(0.1, Math.round((Number(parsed.estimatedMetric) || (cat === 'maggot' ? 8 : 7)) * 10) / 10);
+
+            const newUnit = createUnitFromTelegram({
+              category: cat,
+              species: sp,
+              name: uName,
+              population: pop
+            }, estAge, estMetric, parsed.statusNote || 'Sehat & Aktif', '', senderName);
+
+            targetUnit = newUnit;
+            detectedUnitName = newUnit.name;
+            const mU = cat === 'maggot' ? 'mm' : 'cm';
+            aiUpdatedUnitInfo = `✨ *Unit Baru Otomatis Dibuat:* ${newUnit.name} (${newUnit.species}, Hr ${estAge}, ${estMetric} ${mU}) + Jadwal kantor 07:30–16:00 WIB aktif`;
           }
         }
       }
@@ -903,41 +958,94 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
   }
 }
 
+function generateSchedulesForUnit(unit) {
+  if (!unit || !unit.id) return [];
+  if (!Array.isArray(state.schedules)) state.schedules = [];
+  const cat = unit.category || 'tanaman';
+  let defaultTasks = [];
+  if (cat === 'ternak') {
+    defaultTasks = [
+      { time: '07:30', title: 'Pemberian Pakan Pagi & Cek Nafsu Makan', freq: 'Harian' },
+      { time: '08:30', title: 'Pengecekan Kualitas Air Kolam (Warna, Bau & Suhu)', freq: 'Harian' },
+      { time: '12:30', title: 'Pemberian Pakan Siang (Pelet / Maggot)', freq: 'Harian' },
+      { time: '15:45', title: 'Pemberian Pakan Sore & Cek Sirkulasi Air', freq: 'Harian' }
+    ];
+  } else if (cat === 'maggot') {
+    defaultTasks = [
+      { time: '08:00', title: 'Pemberian Sampah Organik Cacah & Cek Kelembaban Biopond', freq: 'Harian' },
+      { time: '13:00', title: 'Pengecekan Kelembaban & Suhu Biopond', freq: 'Harian' },
+      { time: '15:30', title: 'Pengadukan Media & Monitoring Kasgot', freq: 'Harian' }
+    ];
+  } else {
+    // tanaman
+    defaultTasks = [
+      { time: '07:30', title: 'Penyiraman Pagi (Air Kolam Daur Ulang) & Cek Hama Daun', freq: 'Harian' },
+      { time: '09:30', title: 'Pengecekan Media Tanam & Aplikasi Kasgot', freq: '2 Hari Sekali' },
+      { time: '15:30', title: 'Penyiraman Sore & Pengecekan Kelembaban Tanah', freq: 'Harian' }
+    ];
+  }
+
+  const created = [];
+  defaultTasks.forEach(dt => {
+    const exists = state.schedules.some(s => s.unitName === unit.name && s.title === dt.title && !s.done);
+    if (!exists) {
+      const newSched = {
+        id: 's' + Date.now() + Math.floor(Math.random() * 9999),
+        time: clampToOfficeHours(dt.time, '07:30'),
+        category: cat,
+        unitId: unit.id,
+        unitName: unit.name,
+        title: dt.title,
+        freq: dt.freq,
+        done: false,
+        aiGenerated: true
+      };
+      state.schedules.push(newSched);
+      created.push(newSched);
+    }
+  });
+  state.schedules.sort((a, b) => a.time.localeCompare(b.time));
+  return created;
+}
+
 function createUnitFromTelegram(sess, ageDays, metric, statusNote, photoDataUrl, senderName) {
   if (!Array.isArray(state.units)) state.units = [];
   const cat = sess.category || 'tanaman';
   const typesList = (state.types && state.types[cat]) || [];
   const typeObj = typesList.find(t => t.name === sess.species) || {};
-  const targetDays = typeObj.harvestDays || (cat === 'ternak' ? 75 : cat === 'maggot' ? 18 : 60);
+  const targetDays = typeObj.harvestDays || (cat === 'ternak' ? 60 : cat === 'maggot' ? 18 : 60);
   const targetSize = typeObj.targetSize || (cat === 'ternak' ? 24 : cat === 'maggot' ? 22 : 50);
+  const safeAge = Math.max(1, Math.round(Number(ageDays) || 1));
+  const safeMetric = Math.max(0.1, Math.round((Number(metric) || (cat === 'maggot' ? 8 : 7)) * 10) / 10);
   const newUnit = {
-    id: 'u' + Date.now(),
+    id: 'u' + Date.now() + Math.floor(Math.random() * 1000),
     category: cat,
-    species: sess.species || 'Umum',
+    species: sess.species || (cat === 'ternak' ? 'Ikan Lele' : cat === 'maggot' ? 'Maggot BSF' : 'Cabai Rawit'),
     name: sess.name || 'Unit Baru Telegram',
-    population: sess.population || '1 unit',
-    startDate: getWibNow(-(ageDays - 1)).dateKey,
-    ageDays,
+    population: sess.population || (cat === 'ternak' ? '200 ekor' : cat === 'maggot' ? '1 kg' : '10 polybag'),
+    startDate: getWibNow(-(safeAge - 1)).dateKey,
+    ageDays: safeAge,
     targetDays,
     targetSize,
-    metric,
+    metric: safeMetric,
     visual1: cat === 'ternak' ? 'Hijau Kecokelatan (Ideal)' : cat === 'maggot' ? 'Gembur & Lembab Pas' : 'Hijau Segar & Tegak',
     visual2: cat === 'ternak' ? 'Tidak Bau, Makan Lahap' : cat === 'maggot' ? 'Aktif Makan, Tidak Bau' : 'Lembab Pas',
     statusNote: statusNote || 'Sehat & Aktif',
-    history: [metric],
+    history: [safeMetric],
     checklistDone: [false, false, false]
   };
   state.units.push(newUnit);
+  generateSchedulesForUnit(newUnit);
   if (photoDataUrl) {
     if (!Array.isArray(state.photoLogs)) state.photoLogs = [];
     state.photoLogs.unshift({
-      id: 'p' + Date.now(), unitId: newUnit.id, unitName: newUnit.name, ageDays,
-      metricStr: `${metric} ${cat === 'maggot' ? 'mm' : 'cm'}`, engine: 'Foto Awal (TG)',
+      id: 'p' + Date.now(), unitId: newUnit.id, unitName: newUnit.name, ageDays: safeAge,
+      metricStr: `${safeMetric} ${cat === 'maggot' ? 'mm' : 'cm'}`, engine: 'Foto Awal (TG)',
       dateStr: `${getWibNow().dateKey} ${getWibNow().timeKey} WIB`, risk: 'ok',
       summary: `Input unit baru via Telegram oleh ${senderName}`, photoDataUrl
     });
   }
-  addActivityLog('human', senderName, 'Input Unit via Telegram', `${newUnit.name} (${newUnit.species}, Hr ${ageDays}, ${metric})`);
+  addActivityLog('human', senderName, 'Input Unit via Telegram', `${newUnit.name} (${newUnit.species}, Hr ${safeAge}, ${safeMetric})`);
   saveState(state);
   return newUnit;
 }
@@ -949,7 +1057,20 @@ function generateLocalTelegramAnswer(question, st) {
   const eco = (st && st.ecoStats) || { wasteKg: 0, waterLiters: 0, kasgotKg: 0 };
   const harvests = (st && Array.isArray(st.harvestHistory)) ? st.harvestHistory : [];
 
-  if (units.length === 0) return 'Belum ada data unit yang tersimpan di AgroSync AI. Gunakan tombol *📝 Isi Form / Input Unit* untuk menambahkan data awal.';
+  if (units.length === 0) {
+    return 'Belum ada data unit budidaya tersimpan di AgroSync AI.\n\n' +
+      '💡 *Cara Mengisi / Update Data via Telegram:*\n' +
+      '1️⃣ *Ketik langsung pesan natural*, contoh:\n' +
+      '   • `Tambah Kolam Lele 1 tebar 300 ekor ukuran 7 cm umur 5 hari`\n' +
+      '   • `Tanam 20 polybag cabai rawit ukuran 15 cm umur 20 hari`\n' +
+      '   • `Tebar Maggot BSF 2 kg umur 4 hari ukuran 8 mm`\n' +
+      '   • `Sampah organik 2.5 kg ke maggot`\n' +
+      '   • `Siram tanaman pakai air kolam 30 liter`\n' +
+      '   • `Panen kasgot 2 kg`\n' +
+      '2️⃣ *Kirim Foto Langsung* (AI Vision mendeteksi otomatis & menyimpannya)\n' +
+      '3️⃣ *Tekan tombol "📝 Isi Form / Input Unit"* di bawah.\n\n' +
+      '_Jadwal hari kerja kantor (07:30–16:00 WIB) otomatis dibuatkan untuk setiap unit baru!_';
+  }
 
   if (/(jadwal|tugas|piket|selesai|belum)/.test(q)) {
     const pending = scheds.filter(s => !s.done);
@@ -981,8 +1102,8 @@ function tryLocalNaturalDataEntry(text, senderName) {
   if (!state) return null;
   const raw = String(text || '').trim();
   const q = raw.toLowerCase();
-  // Abaikan jika kalimat jelas merupakan pertanyaan
-  if (/^(apakah|bagaimana|gimana|kenapa|mengapa|kapan|berapa|siapa|dimana|di mana|mana|tolong jelaskan|jelaskan|apa\s)/.test(q) || q.includes('?')) {
+  // Abaikan jika kalimat jelas merupakan pertanyaan murni
+  if (/^(apakah|bagaimana|gimana|kenapa|mengapa|kapan|berapa|siapa|dimana|di mana|mana|tolong jelaskan|jelaskan|apa\s)/.test(q) || (q.includes('?') && !/(tambah|input|tebar|tanam|ukuran|sampah|air kolam|kasgot)/i.test(q))) {
     return null;
   }
 
@@ -991,10 +1112,81 @@ function tryLocalNaturalDataEntry(text, senderName) {
   const changes = [];
   const parseNum = s => parseFloat(String(s || '0').replace(',', '.'));
 
+  // 0. Deteksi Tambah / Input Unit Baru Cepat via Pesan Natural
+  // Contoh:
+  // "Tambah Kolam Lele 1 tebar 300 ekor ukuran 7 cm umur 5 hari"
+  // "Tanam 20 polybag cabai rawit ukuran 15 cm umur 20 hari"
+  // "Tebar maggot bsf 2 kg umur 4 hari ukuran 8 mm"
+  // "Input kolam lele 2 200 ekor bibit 8 cm 10 hari"
+  const isAddUnitCmd = /(?:tambah|input|buat|masukkan|tebar|tanam|semai)\b/i.test(q) &&
+                       /(?:lele|nila|ikan|kolam|maggot|bsf|biopond|cabai|cabe|tomat|terong|kangkung|bayam|pakcoy|sawi|tanaman|polybag|polibag|bedeng)\b/i.test(q);
+  if (isAddUnitCmd) {
+    let cat = 'tanaman';
+    let species = 'Cabai Rawit';
+    if (/(lele|nila|ikan|kolam|gurame|patin)/i.test(q)) {
+      cat = 'ternak';
+      species = /(nila)/i.test(q) ? 'Ikan Nila' : 'Ikan Lele';
+    } else if (/(maggot|bsf|larva|biopond|kasgot)/i.test(q)) {
+      cat = 'maggot';
+      species = 'Maggot BSF';
+    } else {
+      cat = 'tanaman';
+      if (/(cabai|cabe)/i.test(q)) species = 'Cabai Rawit';
+      else if (/(terong)/i.test(q)) species = 'Terong Ungu';
+      else if (/(tomat)/i.test(q)) species = 'Tomat Rampai';
+      else if (/(kangkung)/i.test(q)) species = 'Kangkung Budikdamber';
+      else if (/(pakcoy|sawi)/i.test(q)) species = 'Pakcoy / Sawi';
+      else if (/(bayam)/i.test(q)) species = 'Bayam Hijau';
+    }
+
+    // Nama unit
+    let unitName = '';
+    const nameMatch = raw.match(/(?:tambah|input|buat|masukkan|tebar|tanam|semai)\s+(?:unit\s+)?([A-Za-z0-9\s_-]+?)(?=\s+(?:tebar|tanam|sebanyak|populasi|ukuran|umur|usia|\d+\s*(?:ekor|polybag|polibag|kg|bibit|benih|cm|mm|hari))|$)/i);
+    if (nameMatch && nameMatch[1] && nameMatch[1].trim().length >= 3 && nameMatch[1].trim().length <= 40) {
+      unitName = nameMatch[1].trim();
+    } else {
+      const countExisting = ((state.units || []).filter(u => u.category === cat).length) + 1;
+      unitName = cat === 'ternak' ? `Kolam ${species} ${countExisting}` : cat === 'maggot' ? `Biopond Maggot ${countExisting}` : `Bedeng ${species} ${countExisting}`;
+    }
+
+    // Populasi
+    let pop = '';
+    const popMatch = q.match(/(\d+)\s*(ekor|bibit|benih|polybag|polibag|pot|batang|kg|box|wadah)/i);
+    if (popMatch) {
+      pop = `${popMatch[1]} ${popMatch[2]}`;
+    } else {
+      pop = cat === 'ternak' ? '200 ekor' : cat === 'maggot' ? '1 kg' : '15 polybag';
+    }
+
+    // Umur (hari)
+    let ageDays = 1;
+    const ageMatch = q.match(/(?:umur|usia|hr|hari)\s*(\d+)/i) || q.match(/(\d+)\s*(?:hari|hr)\b/i);
+    if (ageMatch) {
+      ageDays = Math.max(1, parseInt(ageMatch[1], 10));
+    }
+
+    // Ukuran (cm / mm)
+    let metric = cat === 'maggot' ? 8 : 7;
+    const mMatch = q.match(/(\d+(?:[.,]\d+)?)\s*(?:cm|centi|centimeter|mm|mili|milimeter)\b/i);
+    if (mMatch) {
+      metric = parseNum(mMatch[1]);
+    }
+
+    const newUnit = createUnitFromTelegram({
+      category: cat,
+      species,
+      name: unitName,
+      population: pop
+    }, ageDays, metric, 'Sehat & Aktif (Input Cepat TG)', '', senderName);
+
+    const mU = cat === 'maggot' ? 'mm' : 'cm';
+    changes.push(`✨ *Unit Baru Berhasil Disimpan:*\n• Nama: *${newUnit.name}*\n• Komoditas: *${newUnit.species}* (${cat})\n• Populasi: *${newUnit.population}*\n• Umur Realtime: *Hr ${newUnit.ageDays}* | Ukuran: *${newUnit.metric} ${mU}*\n• Jadwal Hari Kerja Kantor (07:30–16:00 WIB) otomatis aktif!`);
+  }
+
   // 1. Deteksi Sampah Organik -> Maggot (misal: "menaruh sampah ke magot 1,5 kg", "sampah 2 kg", "kasih makan maggot 1.5kg")
-  const wasteMatch = q.match(/(?:sampah|limbah|sisa dapur|mag+ot)[^\d]{0,35}(\d+(?:[.,]\d+)?)\s*(kg|kilogram|gram|gr|g)\b/) ||
-                     q.match(/(\d+(?:[.,]\d+)?)\s*(kg|kilogram|gram|gr|g)\s*(?:sampah|limbah|ke mag+ot|untuk mag+ot)/);
-  if (wasteMatch && /(sampah|limbah|sisa dapur|mag+ot)/.test(q) && !/kasgot/.test(q.slice(0, wasteMatch.index + 25))) {
+  const wasteMatch = q.match(/(?:sampah|limbah|sisa dapur|organik|mag+ot)[^\d]{0,35}(\d+(?:[.,]\d+)?)\s*(kg|kilogram|gram|gr|g)\b/) ||
+                     q.match(/(\d+(?:[.,]\d+)?)\s*(kg|kilogram|gram|gr|g)\s*(?:sampah|limbah|ke mag+ot|untuk mag+ot|organik)/);
+  if (wasteMatch && /(sampah|limbah|sisa dapur|organik|mag+ot)/.test(q) && !/kasgot/.test(q.slice(0, wasteMatch.index + 25))) {
     let val = parseNum(wasteMatch[1]);
     if (/(gram|gr|^g$)/.test(wasteMatch[2])) val = val / 1000;
     if (val > 0 && val < 500) {
@@ -1027,9 +1219,9 @@ function tryLocalNaturalDataEntry(text, senderName) {
     }
   }
 
-  // 4. Deteksi Update Ukuran Unit (misal: "kolam bis sumur 1 sekarang 18 cm", "terong ungu 82 cm")
+  // 4. Deteksi Update Ukuran Unit (misal: "kolam lele 1 sekarang 18 cm", "terong ungu 82 cm", "update kolam 1 10 cm")
   const sizeMatch = q.match(/(\d+(?:[.,]\d+)?)\s*(cm|mm)\b/);
-  if (sizeMatch && Array.isArray(state.units)) {
+  if (sizeMatch && Array.isArray(state.units) && state.units.length > 0 && !isAddUnitCmd) {
     const numVal = parseNum(sizeMatch[1]);
     const matchedUnit = state.units.find(u => {
       const nm = u.name.toLowerCase();
@@ -1045,8 +1237,12 @@ function tryLocalNaturalDataEntry(text, senderName) {
       if (!Array.isArray(matchedUnit.history)) matchedUnit.history = [];
       matchedUnit.history.push(matchedUnit.metric);
       if (matchedUnit.history.length > 12) matchedUnit.history.shift();
+      if (/(sehat|lincah|bagus|kurang|sakit|makan lahap)/i.test(q)) {
+        const noteMatch = raw.match(/(?:sehat|lincah|bagus|kurang|sakit|makan lahap)[^,\n.]*/i);
+        if (noteMatch) matchedUnit.statusNote = noteMatch[0].trim().slice(0, 60);
+      }
       const mU = matchedUnit.category === 'maggot' ? 'mm' : 'cm';
-      changes.push(`📏 Update *${matchedUnit.name}*: ukuran diperbarui menjadi *${matchedUnit.metric} ${mU}*`);
+      changes.push(`📏 Update *${matchedUnit.name}*: ukuran diperbarui menjadi *${matchedUnit.metric} ${mU}* (Status: ${matchedUnit.statusNote})`);
     }
   }
 
@@ -1065,7 +1261,7 @@ function tryLocalNaturalDataEntry(text, senderName) {
 
 async function answerTelegramQuestionWithData(token, chatId, question, senderName) {
   syncRealtimeUnitAges(state);
-  // 1. Cek terlebih dahulu apakah pesan merupakan input data natural (misal: "menaruh sampah ke magot 1,5 kg")
+  // 1. Cek terlebih dahulu apakah pesan merupakan input data natural lokal (misal: "tambah kolam lele 1 ...", "menaruh sampah 2kg")
   const localLoggedReply = tryLocalNaturalDataEntry(question, senderName);
   if (localLoggedReply) {
     await tgApi(token, 'sendMessage', {
@@ -1091,55 +1287,136 @@ async function answerTelegramQuestionWithData(token, chatId, question, senderNam
         const left = Math.max(0, (u.targetDays || 30) - (u.ageDays || 1));
         const mU = u.category === 'maggot' ? 'mm' : 'cm';
         return `${u.name} (${u.species}, ${u.population}): umur Hr ${u.ageDays}/${u.targetDays} (${left === 0 ? 'Siap Panen' : 'sisa ' + left + ' hr'}), ukuran ${u.metric} ${mU}, riwayat [${(u.history || []).slice(-4).join(',')}], status: ${u.statusNote}`;
-      }).join(' | ') || 'belum ada unit';
+      }).join(' | ') || 'belum ada unit tersimpan';
       const schedCtx = scheds.map(s => `${s.time} ${s.title} (${s.freq}) [${s.done ? 'Selesai oleh ' + (s.doneBy || 'Tim') : 'Belum'}]`).join('; ') || 'kosong';
       const harvCtx = harvests.slice(0, 4).map(h => `${h.unitName} (${h.dateStr}, ${h.metric}${h.metricUnit || 'cm'})`).join('; ') || 'belum ada';
       const wCtx = state.weatherData && state.weatherData.current ? `Cuaca: ${state.weatherData.current.temp}C ${state.weatherData.current.desc}.` : '';
 
       const endpoint = aiCfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
+      const systemPrompt = `Kamu Asisten AgroSync AI Kapanewon Pengasih di Telegram. ${GROUNDED_AI_STANDARDS}
+TUGAS UTAMA:
+(1) Jika pesan pengguna berupa LAPORAN, INPUT DATA BARU, UPDATE DATA, ATAU ECO STATS:
+Balas HANYA JSON valid (tanpa teks pengantar apapun):
+{
+  "intent": "log_data",
+  "newUnits": [
+    {
+      "category": "ternak|maggot|tanaman",
+      "species": "Ikan Lele|Ikan Nila|Maggot BSF|Cabai Rawit|Terong Ungu|Tomat Rampai|Kangkung Budikdamber|Pakcoy / Sawi|Bayam Hijau",
+      "name": "nama unit lengkap (contoh: Kolam Lele 1, Biopond Maggot 1, Bedeng Cabai Timur)",
+      "population": "contoh: 300 ekor / 20 polybag / 2 kg",
+      "ageDays": 5,
+      "metric": 7.0,
+      "statusNote": "Sehat & aktif"
+    }
+  ],
+  "updateUnits": [
+    {
+      "unitId": "",
+      "unitName": "nama unit yang cocok",
+      "newMetric": 12.0,
+      "newAgeDays": 0,
+      "newStatus": "kondisi baru"
+    }
+  ],
+  "wasteKgAdd": 0,
+  "waterLitersAdd": 0,
+  "kasgotKgAdd": 0,
+  "confirmMsg": "penjelasan singkat ramah data yang berhasil disimpan"
+}
+
+(2) Jika pesan berupa PERTANYAAN, KONSULTASI, ATAU SAPAAN:
+Jawab langsung dalam bahasa Indonesia ramah, solutif, berdasarkan data aplikasi.`;
+
       const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiCfg.apiKey.trim() },
         body: JSON.stringify({
-          model: aiCfg.model || 'gpt-4o-mini',
-          max_tokens: 400,
-          temperature: 0.3,
+          model: aiCfg.model || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
+          max_tokens: 1500,
+          temperature: 0.2,
           messages: [
-            { role: 'system', content: 'Kamu Asisten AgroSync AI Kapanewon Pengasih di Telegram. ' + GROUNDED_AI_STANDARDS + ' TUGAS: (1) Jika pesan pengguna berupa LAPORAN/INPUT DATA (misal menaruh sampah ke maggot, memakai air kolam untuk siram, panen kasgot, atau update ukuran/kondisi unit), balas HANYA JSON valid: {"intent":"log_data","wasteKgAdd":0,"waterLitersAdd":0,"kasgotKgAdd":0,"unitId":"","newMetric":0,"newStatus":"","confirmMsg":"pesan konfirmasi singkat bahwa data berhasil disimpan"}. (2) Jika pesan berupa PERTANYAAN atau konsultasi tumbuh kembang, jawab langsung dalam teks bahasa Indonesia yang ramah, padat, dan 100% berdasarkan DATA APLIKASI (termasuk data ekosistem sirkular sampah/air/kasgot).' },
+            { role: 'system', content: systemPrompt },
             { role: 'user', content: `Hari: ${wd.dayName} ${wd.dateKey} (${wd.isHoliday ? 'Libur: ' + wd.reason : 'Hari Kerja Kantor'}). ${wCtx}\nUNIT AKTIF: ${unitCtx}\nJADWAL: ${schedCtx}\nRIWAYAT PANEN: ${harvCtx}\nECO: sampah ${eco.wasteKg}kg, air kolam ${eco.waterLiters}L, kasgot ${eco.kasgotKg}kg\n\nPesan dari ${senderName}: ${question}` }
           ]
         })
       });
       const data = await resp.json();
-      const content = data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
+      const choiceMsg = data && data.choices && data.choices[0] && data.choices[0].message;
+      const content = choiceMsg ? (choiceMsg.content || choiceMsg.reasoning_content || '') : '';
       if (content && content.trim()) {
         let handledLog = false;
-        const jsonMatch = content.trim().startsWith('{') ? content.match(/\{[\s\S]*\}/) : null;
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           try {
             const parsed = JSON.parse(jsonMatch[0]);
             if (parsed && parsed.intent === 'log_data') {
+              const notes = [];
+
+              // 1. Tambah unit baru dari ekstraksi AI
+              if (Array.isArray(parsed.newUnits) && parsed.newUnits.length > 0) {
+                parsed.newUnits.forEach(nu => {
+                  if (nu.name) {
+                    const cat = ['ternak', 'maggot', 'tanaman'].includes(nu.category) ? nu.category : 'tanaman';
+                    const uAge = Math.max(1, Math.round(Number(nu.ageDays) || 1));
+                    const uMetric = Math.max(0.1, Math.round(Number(nu.metric || (cat === 'maggot' ? 8 : 7)) * 10) / 10);
+                    const created = createUnitFromTelegram({
+                      category: cat,
+                      species: nu.species || (cat === 'ternak' ? 'Ikan Lele' : cat === 'maggot' ? 'Maggot BSF' : 'Cabai Rawit'),
+                      name: nu.name,
+                      population: nu.population || (cat === 'ternak' ? '200 ekor' : cat === 'maggot' ? '1 kg' : '10 polybag')
+                    }, uAge, uMetric, nu.statusNote || 'Sehat & Aktif', '', senderName);
+                    const mU = cat === 'maggot' ? 'mm' : 'cm';
+                    notes.push(`✨ *Unit Baru:* ${created.name} (${created.species}, ${created.population}, Hr ${uAge}, ${uMetric} ${mU})`);
+                  }
+                });
+              }
+
+              // 2. Update unit dari ekstraksi AI
+              if (Array.isArray(parsed.updateUnits) && parsed.updateUnits.length > 0) {
+                parsed.updateUnits.forEach(uu => {
+                  const tu = (state.units || []).find(u => u.id === uu.unitId || (uu.unitName && u.name.toLowerCase().includes(String(uu.unitName).toLowerCase())));
+                  if (tu) {
+                    const mU = tu.category === 'maggot' ? 'mm' : 'cm';
+                    if (uu.newMetric && Number(uu.newMetric) > 0) {
+                      tu.metric = Math.round(Number(uu.newMetric) * 10) / 10;
+                      if (!Array.isArray(tu.history)) tu.history = [];
+                      tu.history.push(tu.metric);
+                      if (tu.history.length > 12) tu.history.shift();
+                      notes.push(`📏 Ukuran *${tu.name}* -> *${tu.metric} ${mU}*`);
+                    }
+                    if (uu.newAgeDays && Number(uu.newAgeDays) > 0) {
+                      tu.ageDays = Math.round(Number(uu.newAgeDays));
+                      tu.startDate = getWibNow(-(tu.ageDays - 1)).dateKey;
+                      notes.push(`⏳ Umur *${tu.name}* -> *Hr ${tu.ageDays}*`);
+                    }
+                    if (uu.newStatus && String(uu.newStatus).trim()) {
+                      tu.statusNote = String(uu.newStatus).trim().slice(0, 60);
+                      notes.push(`📋 Status *${tu.name}* -> *${tu.statusNote}*`);
+                    }
+                  }
+                });
+              }
+
+              // 3. Update Eco Stats dari ekstraksi AI
               if (!state.ecoStats) state.ecoStats = { wasteKg: 0, waterLiters: 0, kasgotKg: 0 };
-              if ((parsed.wasteKgAdd > 0 || parsed.waterLitersAdd > 0 || parsed.kasgotKgAdd > 0)) {
+              const wAdd = Number(parsed.wasteKgAdd) || 0;
+              const lAdd = Number(parsed.waterLitersAdd) || 0;
+              const kAdd = Number(parsed.kasgotKgAdd) || 0;
+              if (wAdd > 0 || lAdd > 0 || kAdd > 0) {
                 if (!Array.isArray(state.ecoStatsHistory)) state.ecoStatsHistory = [];
                 state.ecoStatsHistory.push({ wasteKg: Number(state.ecoStats.wasteKg || 0), waterLiters: Number(state.ecoStats.waterLiters || 0), kasgotKg: Number(state.ecoStats.kasgotKg || 0) });
                 if (state.ecoStatsHistory.length > 20) state.ecoStatsHistory.shift();
+
+                if (wAdd > 0) { state.ecoStats.wasteKg = Math.round((state.ecoStats.wasteKg + wAdd) * 10) / 10; notes.push(`♻️ Sampah ke Maggot: *+${wAdd} kg* (Total: *${state.ecoStats.wasteKg} kg*)`); }
+                if (lAdd > 0) { state.ecoStats.waterLiters = Math.round(state.ecoStats.waterLiters + lAdd); notes.push(`💧 Air Kolam Daur Ulang: *+${lAdd} L* (Total: *${state.ecoStats.waterLiters} L*)`); }
+                if (kAdd > 0) { state.ecoStats.kasgotKg = Math.round((state.ecoStats.kasgotKg + kAdd) * 10) / 10; notes.push(`🌱 Kasgot Terkumpul: *+${kAdd} kg* (Total: *${state.ecoStats.kasgotKg} kg*)`); }
               }
-              const notes = [];
-              if (parsed.wasteKgAdd > 0) { state.ecoStats.wasteKg = Math.round((state.ecoStats.wasteKg + Number(parsed.wasteKgAdd)) * 10) / 10; notes.push(`♻️ Sampah ke Maggot +${parsed.wasteKgAdd} kg (Total: ${state.ecoStats.wasteKg} kg)`); }
-              if (parsed.waterLitersAdd > 0) { state.ecoStats.waterLiters = Math.round(state.ecoStats.waterLiters + Number(parsed.waterLitersAdd)); notes.push(`💧 Air Kolam +${parsed.waterLitersAdd} L (Total: ${state.ecoStats.waterLiters} L)`); }
-              if (parsed.kasgotKgAdd > 0) { state.ecoStats.kasgotKg = Math.round((state.ecoStats.kasgotKg + Number(parsed.kasgotKgAdd)) * 10) / 10; notes.push(`🌱 Kasgot +${parsed.kasgotKgAdd} kg (Total: ${state.ecoStats.kasgotKg} kg)`); }
-              if (parsed.unitId) {
-                const tu = (state.units || []).find(u => u.id === parsed.unitId);
-                if (tu) {
-                  if (parsed.newMetric > 0) { tu.metric = Math.round(Number(parsed.newMetric) * 10) / 10; if (!Array.isArray(tu.history)) tu.history = []; tu.history.push(tu.metric); notes.push(`📏 ${tu.name}: ${tu.metric} ${tu.category === 'maggot' ? 'mm' : 'cm'}`); }
-                  if (parsed.newStatus) { tu.statusNote = String(parsed.newStatus).slice(0, 60); notes.push(`📋 Status ${tu.name}: ${tu.statusNote}`); }
-                }
-              }
+
               if (notes.length > 0) {
-                addActivityLog('ai', 'AI Parser (TG)', `Input Data Natural (${senderName})`, question.slice(0, 90));
+                addActivityLog('ai', 'AI Extraction (TG)', `Input Data Ekstraksi AI (${senderName})`, question.slice(0, 90));
                 saveState(state);
-                answer = `✅ *Data Berhasil Disimpan & Tersinkron ke Web App!*\n${notes.join('\n')}\n\n_${parsed.confirmMsg || 'Data sudah masuk ke sistem dan analisis AI.'}_`;
+                answer = `✅ *Data Berhasil Diekstrak & Tersimpan ke Sistem!*\n\n${notes.join('\n')}\n\n_Pelapor: ${senderName} • ${parsed.confirmMsg || 'Data otomatis tersinkron ke Web App dan jadwal kantor 07:30–16:00 WIB telah aktif.'}_`;
                 handledLog = true;
               }
             }
