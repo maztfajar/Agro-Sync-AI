@@ -8,6 +8,10 @@ package-lock.json
 **/data/backups/
 **/data/*.tmp*
 *.tmp.*
+data/state.json
+data/*.json
+!**/data/.gitkeep
+!data/.gitkeep
 
 # Environment variables & secrets
 .env
