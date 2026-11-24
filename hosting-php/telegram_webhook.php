@@ -107,19 +107,21 @@ if (!empty($upd['message']['photo']) && is_array($upd['message']['photo'])) {
             CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 25,
             CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . trim($aiCfg['apiKey'])],
             CURLOPT_POSTFIELDS => json_encode([
-                'model' => $aiCfg['model'] ?? 'gpt-4o-mini', 'max_tokens' => 320, 'temperature' => 0.25,
+                'model' => $aiCfg['model'] ?? 'nvidia/nemotron-3.5-super-vl-120b-a12b', 'max_tokens' => 2500, 'temperature' => 0.25,
                 'messages' => [
-                    ['role' => 'system', 'content' => 'Kamu ahli agronomi & akuakultur AgroSync AI (acuan KKP, IPB Digitani, PIAT UGM, BRMP). Balas HANYA JSON: {"risk":"ok|warn|danger","diagnosis":"1-2 kalimat","treatment":"1-2 kalimat"}'],
+                    ['role' => 'system', 'content' => 'Kamu ahli agronomi & akuakultur AgroSync AI (acuan KKP, IPB Digitani, PIAT UGM, BRMP). Analisis foto tanaman/komoditas secara cermat untuk mendeteksi tanda pertumbuhan atau gejala penyakit/hama. Balas HANYA JSON: {"risk":"ok|warn|danger","diagnosis":"1-2 kalimat (sebutkan gejala penyakit jika ada)","treatment":"1-2 kalimat"}'],
                     ['role' => 'user', 'content' => [['type' => 'text', 'text' => "Keterangan: " . ($caption ?: 'Cek hama/penyakit')], ['type' => 'image_url', 'image_url' => ['url' => $dataUrl]]]]
                 ]
             ])
         ]);
         $aiRaw = curl_exec($ch); curl_close($ch);
         $aiJson = json_decode($aiRaw, true);
-        $txt = $aiJson['choices'][0]['message']['content'] ?? '';
-        if (preg_match('/\{[\s\S]*\}/', $txt, $m)) {
+        $txt = $aiJson['choices'][0]['message']['content'] ?? $aiJson['choices'][0]['message']['reasoning_content'] ?? '';
+        if (is_string($txt) && preg_match('/\{[\s\S]*\}/', $txt, $m)) {
             $p = json_decode($m[0], true);
             if (!empty($p['diagnosis'])) { $diagnosis = $p['diagnosis']; $treatment = $p['treatment'] ?? $treatment; $risk = $p['risk'] ?? 'warn'; }
+        } elseif (is_string($txt) && trim($txt)) {
+            $diagnosis = mb_substr(trim(strip_tags($txt)), 0, 300);
         }
     }
     if (!isset($state['photoLogs']) || !is_array($state['photoLogs'])) $state['photoLogs'] = [];

@@ -3441,6 +3441,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
 
       function parseJsonLoose(text) {
         try {
+          if (!text || typeof text !== 'string') return null;
           const match = text.match(/\{[\s\S]*\}/);
           if (match) return JSON.parse(match[0]);
         } catch (e) {

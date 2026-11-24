@@ -725,8 +725,8 @@ async function runScheduledJobs() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiCfg.apiKey.trim() },
         body: JSON.stringify({
-          model: aiCfg.model || 'gpt-4o-mini',
-          max_tokens: 450,
+          model: aiCfg.model || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
+          max_tokens: 3000,
           temperature: 0.3,
           messages: [
             { role: 'system', content: 'Asisten AgroSync AI Kapanewon Pengasih. ' + GROUNDED_AI_STANDARDS + ' ATURAN KANTOR & JAM KERJA: Jadwal piket HANYA Senin-Jumat jam kerja kantor (07:30-16:00 WIB), dimulai paling awal pukul 07:30 WIB dan paling akhir pukul 16:00 WIB (DILARANG sebelum 07:30 atau setelah 16:00 WIB). Libur Sabtu/Minggu/Tanggal Merah. Balas HANYA JSON: {"summary":"ringkasan evaluasi 2 kalimat","schedules":[{"time":"HH:MM","category":"ternak|maggot|tanaman","unitName":"nama","title":"aksi","freq":"Harian|Mingguan|Bulanan|Sekali"}]}' },
@@ -734,11 +734,14 @@ async function runScheduledJobs() {
           ]
         })
       });
-      const data = await resp.json();
-      const content = data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
-      const match = content.match(/\{[\s\S]*\}/);
-      if (match) {
-        const parsed = JSON.parse(match[0]);
+      if (resp.ok) {
+        const data = await resp.json();
+        const choiceMsg = data && data.choices && data.choices[0] && data.choices[0].message;
+        let content = choiceMsg ? (choiceMsg.content || choiceMsg.reasoning_content || '') : '';
+        content = String(content || '').trim();
+        const match = content ? content.match(/\{[\s\S]*\}/) : null;
+        if (match) {
+          const parsed = JSON.parse(match[0]);
         if (!wd.isHoliday && Array.isArray(parsed.schedules)) {
           parsed.schedules.forEach(ns => {
             const dup = (state.schedules || []).some(ex => ex.unitName === ns.unitName && ex.title.toLowerCase() === String(ns.title || '').toLowerCase() && !ex.done);
@@ -766,6 +769,7 @@ async function runScheduledJobs() {
           await broadcastTelegram(state.telegram.token.trim(), `🤖 *Ringkasan Pagi AgroSync AI (${wd.dayName}, ${dateKey})*\n${parsed.summary || 'Jadwal hari ini telah diperbarui otomatis.'}\n\nGunakan menu di bawah untuk melihat jadwal & laporan.`, { reply_markup: getMainInlineKeyboard() });
         }
         console.log('[AI Scheduler] Analisis terjadwal selesai & disinkronkan.');
+        }
       }
     } catch (err) {
       console.error('[AI Scheduler] Gagal menjalankan AI terjadwal:', err.message);
@@ -964,28 +968,36 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
     if (sess.mode === 'add_unit' && sess.step === 'metrics') {
       let estAge = 14, estMetric = 10, estNote = 'Sehat & Aktif';
       if (aiCfg.enabled && aiCfg.apiKey && aiCfg.baseUrl && aiCfg.baseUrl.startsWith('https://')) {
-        const endpoint = aiCfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
-        const aiResp = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiCfg.apiKey.trim() },
-          body: JSON.stringify({
-            model: aiCfg.model || 'gpt-4o-mini',
-            max_tokens: 250,
-            temperature: 0.2,
-            messages: [
-              { role: 'system', content: 'Analisis foto unit budidaya baru. Balas HANYA JSON: {"ageDays":14,"metric":10,"statusNote":"kondisi singkat"}' },
-              { role: 'user', content: [{ type: 'text', text: `Unit ${sess.name} (${sess.category}/${sess.species}). Perkirakan umur hari, ukuran cm/mm, dan statusnya.` }, { type: 'image_url', image_url: { url: dataUrl } }] }
-            ]
-          })
-        });
-        const aiData = await aiResp.json();
-        const content = aiData && aiData.choices && aiData.choices[0] && aiData.choices[0].message ? aiData.choices[0].message.content : '';
-        const m = content.match(/\{[\s\S]*\}/);
-        if (m) {
-          const p = JSON.parse(m[0]);
-          if (p.ageDays) estAge = Math.max(1, Math.round(Number(p.ageDays)));
-          if (p.metric) estMetric = Math.max(0.1, Number(p.metric));
-          if (p.statusNote) estNote = String(p.statusNote).slice(0, 60);
+        try {
+          const endpoint = aiCfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
+          const aiResp = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiCfg.apiKey.trim() },
+            body: JSON.stringify({
+              model: aiCfg.model || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
+              max_tokens: 2500,
+              temperature: 0.2,
+              messages: [
+                { role: 'system', content: 'Analisis foto unit budidaya baru. Balas HANYA JSON: {"ageDays":14,"metric":10,"statusNote":"kondisi singkat"}' },
+                { role: 'user', content: [{ type: 'text', text: `Unit ${sess.name} (${sess.category}/${sess.species}). Perkirakan umur hari, ukuran cm/mm, dan statusnya.` }, { type: 'image_url', image_url: { url: dataUrl } }] }
+              ]
+            })
+          });
+          if (aiResp.ok) {
+            const aiData = await aiResp.json();
+            const choiceMsg = aiData && aiData.choices && aiData.choices[0] && aiData.choices[0].message;
+            let content = choiceMsg ? (choiceMsg.content || choiceMsg.reasoning_content || '') : '';
+            content = String(content || '').trim();
+            const m = content ? content.match(/\{[\s\S]*\}/) : null;
+            if (m) {
+              const p = JSON.parse(m[0]);
+              if (p.ageDays) estAge = Math.max(1, Math.round(Number(p.ageDays)));
+              if (p.metric) estMetric = Math.max(0.1, Number(p.metric));
+              if (p.statusNote) estNote = String(p.statusNote).slice(0, 60);
+            }
+          }
+        } catch (e) {
+          console.warn('[Telegram Add Unit Photo AI Error]:', e.message);
         }
       }
       const newUnit = createUnitFromTelegram(sess, estAge, estMetric, estNote, dataUrl, senderName);
@@ -1018,10 +1030,10 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiCfg.apiKey.trim() },
         body: JSON.stringify({
           model: aiCfg.model || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
-          max_tokens: 500,
+          max_tokens: 3000,
           temperature: 0.25,
           messages: [
-            { role: 'system', content: 'Kamu ahli agronomi & akuakultur AgroSync AI Kapanewon Pengasih. ' + GROUNDED_AI_STANDARDS + ' Analisis foto secara SANGAT CERMAT meskipun pengguna tidak menulis teks. Periksa apakah foto ini unit baru atau unit lama, jenis komoditas (lele/nila, maggot bsf, atau sayuran), tahap pertumbuhan, estimasi ukuran, dan tanda penyakit. Balas HANYA JSON valid: {"risk":"ok|warn|danger","isNewUnit":false,"category":"ternak|maggot|tanaman","species":"nama komoditas spesifik","unitId":"id unit jika cocok","unitName":"nama unit","population":"estimasi populasi","ageDays":10,"estimatedMetric":7.5,"diagnosis":"analisis visual cermat 1-2 kalimat","treatment":"langkah penanganan praktis 1-2 kalimat","statusNote":"status singkat 2-4 kata","taskTitle":"tugas jam kerja kantor 07:30-16:00 WIB jika perlu","taskTime":"07:30"}' },
+            { role: 'system', content: 'Kamu ahli agronomi & akuakultur AgroSync AI Kapanewon Pengasih. ' + GROUNDED_AI_STANDARDS + ' Analisis foto secara SANGAT CERMAT meskipun pengguna tidak menulis teks. Periksa apakah foto ini unit baru atau unit lama, jenis komoditas (sayuran/tanaman seperti cabai/tomat/terong/bayam, ternak lele/nila, atau maggot bsf), tahap pertumbuhan, estimasi ukuran, dan tanda gejala penyakit atau hama (bercak daun, kutu/thrips, daun keriting/menguning, jamur, busuk buah, dll). Balas HANYA JSON valid: {"risk":"ok|warn|danger","isNewUnit":false,"category":"ternak|maggot|tanaman","species":"nama komoditas spesifik","unitId":"id unit jika cocok","unitName":"nama unit","population":"estimasi populasi","ageDays":10,"estimatedMetric":7.5,"diagnosis":"analisis visual cermat 1-2 kalimat (sebutkan gejala penyakit atau hama jika ada)","treatment":"langkah penanganan praktis 1-2 kalimat (pupuk/pestisida nabati/perlakuan air/karantina)","statusNote":"status singkat 2-4 kata","taskTitle":"tugas jam kerja kantor 07:30-16:00 WIB jika perlu","taskTime":"07:30"}' },
             {
               role: 'user',
               content: [
@@ -1032,11 +1044,34 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
           ]
         })
       });
+      if (!aiResp.ok) {
+        const errText = await aiResp.text();
+        console.error(`[Telegram Photo] AI HTTP ${aiResp.status}:`, errText);
+        let errMsg = `HTTP ${aiResp.status}`;
+        try {
+          const parsedErr = JSON.parse(errText);
+          if (parsedErr && parsedErr.error && parsedErr.error.message) errMsg = parsedErr.error.message;
+        } catch (_) {}
+        throw new Error(`AI Provider: ${errMsg}`);
+      }
       const aiData = await aiResp.json();
-      const content = aiData && aiData.choices && aiData.choices[0] && aiData.choices[0].message ? aiData.choices[0].message.content : '';
-      const match = content.match(/\{[\s\S]*\}/);
-      if (match) {
-        const parsed = JSON.parse(match[0]);
+      const choiceMsg = aiData && aiData.choices && aiData.choices[0] && aiData.choices[0].message;
+      let content = choiceMsg ? (choiceMsg.content || choiceMsg.reasoning_content || '') : '';
+      content = String(content || '').trim();
+
+      let parsed = null;
+      if (content) {
+        const match = content.match(/\{[\s\S]*\}/);
+        if (match) {
+          try {
+            parsed = JSON.parse(match[0]);
+          } catch (pe) {
+            console.warn('[Telegram Photo] JSON parse failed on match:', pe.message);
+          }
+        }
+      }
+
+      if (parsed) {
         diagnosis = parsed.diagnosis || diagnosis;
         treatment = parsed.treatment || treatment;
         risk = ['ok', 'warn', 'danger'].includes(parsed.risk) ? parsed.risk : 'warn';
@@ -1090,6 +1125,10 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
             aiUpdatedUnitInfo = `✨ *Unit Baru Otomatis Dibuat:* ${newUnit.name} (${newUnit.species}, Hr ${estAge}, ${estMetric} ${mU}) + Jadwal kantor 07:30–16:00 WIB aktif`;
           }
         }
+      } else if (content) {
+        diagnosis = content.replace(/```(?:json)?/g, '').replace(/[{}\[\]"]/g, '').slice(0, 300).trim();
+        engine = 'AI Vision (TG)';
+        tokens = (aiData.usage && aiData.usage.total_tokens) || 0;
       }
     }
 
@@ -1151,7 +1190,10 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
     }
   } catch (err) {
     console.error('[Telegram Photo] Error:', err.message);
-    await tgApi(token, 'sendMessage', { chat_id: chatId, text: 'Gagal menganalisis foto: ' + err.message });
+    await tgApi(token, 'sendMessage', {
+      chat_id: chatId,
+      text: `⚠️ *Gagal menganalisis foto:* ${err.message || 'Terjadi gangguan koneksi ke AI'}\n\nSilakan coba kirim ulang foto dengan pencahayaan jelas, atau sertakan keterangan gejala pada caption foto.`
+    });
   } finally {
     stopTyping();
   }
@@ -2096,7 +2138,8 @@ async function pollTelegramUpdates() {
           const chatId = upd.message.chat.id;
           const txt = upd.message.text.trim();
           const lower = txt.toLowerCase();
-          const fallbackName = [upd.message.from.first_name, upd.message.from.last_name].filter(Boolean).join(' ');
+          const fallbackName = [upd.message.from && upd.message.from.first_name, upd.message.from && upd.message.from.last_name].filter(Boolean).join(' ');
+          const actorName = findUserNameByChatId(state, chatId, fallbackName);
           console.log(`[Telegram Bot] Pesan masuk dari ${chatId} (${actorName}): "${txt.slice(0, 80).replace(/\n/g, ' ')}"`);
           tgApi(token, 'sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
 
