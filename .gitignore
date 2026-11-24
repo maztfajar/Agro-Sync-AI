@@ -1,0 +1,13 @@
+# Runtime data & secret tokens (Telegram token, API keys, dynamic state)
+data/state.json
+data/*.json
+!data/.gitkeep
+
+# Environment & dependencies
+node_modules/
+.env
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
