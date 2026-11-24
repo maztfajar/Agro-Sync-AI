@@ -930,6 +930,41 @@ async function startTelegramFormMenu(token, chatId) {
   });
 }
 
+function isLikelyEnglish(str) {
+  if (!str || typeof str !== 'string') return false;
+  const englishPattern = /\b(the|is|are|was|were|in|on|at|with|no|not|healthy|symptoms|disease|maintain|moisture|adequate|ensure|immediate|treatment|needed|visible|leaves|substrate|larvae|infection|water|feed|damage|pest|yellowing|spotted|bacterial|fungal|rot|wilting|plant|plants|crop|crops|growth|stage|signs|recommended|action)\b/gi;
+  const matches = str.match(englishPattern) || [];
+  return matches.length >= 2;
+}
+
+async function translateToIndonesian(text, aiCfg) {
+  if (!text || !isLikelyEnglish(text) || !aiCfg || !aiCfg.apiKey || !aiCfg.baseUrl) return text;
+  try {
+    const endpoint = aiCfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
+    const tResp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiCfg.apiKey.trim() },
+      body: JSON.stringify({
+        model: aiCfg.model || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
+        max_tokens: 1500,
+        temperature: 0.1,
+        messages: [
+          { role: 'system', content: 'Terjemahkan teks pertanian/budidaya ini ke dalam BAHASA INDONESIA yang lugas, baku, dan mudah dipahami. Balas HANYA teks terjemahan tanpa tanda kutip atau penjelasan tambahan.' },
+          { role: 'user', content: text }
+        ]
+      })
+    });
+    if (tResp.ok) {
+      const tData = await tResp.json();
+      const choiceMsg = tData && tData.choices && tData.choices[0] && tData.choices[0].message;
+      let trans = choiceMsg ? (choiceMsg.content || choiceMsg.reasoning_content || '') : '';
+      trans = trans.replace(/^["'\s]+|["'\s]+$/g, '').trim();
+      if (trans && !isLikelyEnglish(trans)) return trans;
+    }
+  } catch (_) {}
+  return text;
+}
+
 // Handler Foto Telegram -> Analisis Vision AI Cermat (tanpa gejala manual pun tetap analisis + auto-update unit!)
 async function handleTelegramPhotoMessage(token, msg, timeKey) {
   const chatId = msg.chat.id;
@@ -943,7 +978,7 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
 
   const chosen = photos[Math.min(photos.length - 1, 2)];
   const aiCfg = (state && state.aiConfig) || {};
-  const targetUnit = (sess.unitId && sess.unitId !== 'auto')
+  let targetUnit = (sess.unitId && sess.unitId !== 'auto')
     ? (state.units || []).find(u => u.id === sess.unitId)
     : null;
 
@@ -1033,11 +1068,11 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
           max_tokens: 3000,
           temperature: 0.25,
           messages: [
-            { role: 'system', content: 'Kamu ahli agronomi & akuakultur AgroSync AI Kapanewon Pengasih. ' + GROUNDED_AI_STANDARDS + ' Analisis foto secara SANGAT CERMAT meskipun pengguna tidak menulis teks. Periksa apakah foto ini unit baru atau unit lama, jenis komoditas (sayuran/tanaman seperti cabai/tomat/terong/bayam, ternak lele/nila, atau maggot bsf), tahap pertumbuhan, estimasi ukuran, dan tanda gejala penyakit atau hama (bercak daun, kutu/thrips, daun keriting/menguning, jamur, busuk buah, dll). Balas HANYA JSON valid: {"risk":"ok|warn|danger","isNewUnit":false,"category":"ternak|maggot|tanaman","species":"nama komoditas spesifik","unitId":"id unit jika cocok","unitName":"nama unit","population":"estimasi populasi","ageDays":10,"estimatedMetric":7.5,"diagnosis":"analisis visual cermat 1-2 kalimat (sebutkan gejala penyakit atau hama jika ada)","treatment":"langkah penanganan praktis 1-2 kalimat (pupuk/pestisida nabati/perlakuan air/karantina)","statusNote":"status singkat 2-4 kata","taskTitle":"tugas jam kerja kantor 07:30-16:00 WIB jika perlu","taskTime":"07:30"}' },
+            { role: 'system', content: 'Kamu ahli agronomi & akuakultur AgroSync AI Kapanewon Pengasih. ' + GROUNDED_AI_STANDARDS + ' ATURAN BAHASA MUTLAK: Seluruh balasan teks (diagnosis, treatment, statusNote, taskTitle) WAJIB 100% menggunakan BAHASA INDONESIA baku, solutif, dan mudah dipahami petani/peternak. DILARANG KERAS MENGGUNAKAN BAHASA INGGRIS (NEVER WRITE ENGLISH). Analisis foto secara SANGAT CERMAT meskipun pengguna tidak menulis teks. Periksa apakah foto ini unit baru atau unit lama, jenis komoditas (sayuran/tanaman seperti cabai/tomat/terong/bayam, ternak lele/nila, atau maggot bsf), tahap pertumbuhan, estimasi ukuran, dan tanda gejala penyakit atau hama (bercak daun, kutu/thrips, daun keriting/menguning, jamur, busuk buah, dll). Balas HANYA JSON valid: {"risk":"ok|warn|danger","isNewUnit":false,"category":"ternak|maggot|tanaman","species":"nama komoditas spesifik","unitId":"id unit jika cocok","unitName":"nama unit","population":"estimasi populasi","ageDays":10,"estimatedMetric":7.5,"diagnosis":"analisis visual cermat 1-2 kalimat bahasa indonesia (sebutkan gejala penyakit atau hama jika ada)","treatment":"langkah penanganan praktis 1-2 kalimat bahasa indonesia (pupuk/pestisida nabati/perlakuan air/karantina)","statusNote":"status singkat 2-4 kata bahasa indonesia","taskTitle":"tugas jam kerja kantor 07:30-16:00 WIB jika perlu","taskTime":"07:30"}' },
             {
               role: 'user',
               content: [
-                { type: 'text', text: `Pengirim: ${senderName}. ${w} Ekosistem Sirkular: sampah ${(state.ecoStats&&state.ecoStats.wasteKg)||0}kg, air kolam ${(state.ecoStats&&state.ecoStats.waterLiters)||0}L, kasgot ${(state.ecoStats&&state.ecoStats.kasgotKg)||0}kg. Unit terpilih: ${targetUnit ? `${targetUnit.id}:${targetUnit.name} (${targetUnit.species}, Hr ${targetUnit.ageDays}, ukuran ${targetUnit.metric})` : 'Auto-deteksi'}. Daftar unit saat ini: ${unitsSummary || 'KOSONG (belum ada unit tersimpan)'}. Keterangan pengguna: ${caption || 'KOSONG - wajib analisis visual cermat dari foto saja'}` },
+                { type: 'text', text: `Pengirim: ${senderName}. ${w} Ekosistem Sirkular: sampah ${(state.ecoStats&&state.ecoStats.wasteKg)||0}kg, air kolam ${(state.ecoStats&&state.ecoStats.waterLiters)||0}L, kasgot ${(state.ecoStats&&state.ecoStats.kasgotKg)||0}kg. Unit terpilih: ${targetUnit ? `${targetUnit.id}:${targetUnit.name} (${targetUnit.species}, Hr ${targetUnit.ageDays}, ukuran ${targetUnit.metric})` : 'Auto-deteksi'}. Daftar unit saat ini: ${unitsSummary || 'KOSONG (belum ada unit tersimpan)'}. Keterangan pengguna: ${caption || 'KOSONG - wajib analisis visual cermat dari foto saja'}\n\nINSTRUKSI PENTING: Wajib berikan hasil analisis HANYA dalam BAHASA INDONESIA (Dilarang Bahasa Inggris).` },
                 { type: 'image_url', image_url: { url: dataUrl } }
               ]
             }
@@ -1130,6 +1165,14 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
         engine = 'AI Vision (TG)';
         tokens = (aiData.usage && aiData.usage.total_tokens) || 0;
       }
+
+      // Pastikan hasil selalu dalam Bahasa Indonesia jika model sempat mengeluarkan Bahasa Inggris
+      if (isLikelyEnglish(diagnosis)) {
+        diagnosis = await translateToIndonesian(diagnosis, aiCfg);
+      }
+      if (isLikelyEnglish(treatment)) {
+        treatment = await translateToIndonesian(treatment, aiCfg);
+      }
     }
 
     if (!Array.isArray(state.photoLogs)) state.photoLogs = [];
@@ -1179,7 +1222,7 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
     saveState(state);
 
     const icon = risk === 'danger' ? '🚨' : risk === 'warn' ? '⚠️' : '✅';
-    const replyText = `${icon} *Hasil Analisis Foto AgroSync AI*\n*Unit:* ${detectedUnitName}\n*Pengirim:* ${senderName}\n*Diagnosis:* ${diagnosis}\n*Penanganan:* ${treatment}${aiUpdatedUnitInfo ? `\n*Auto-Update Unit:* ${aiUpdatedUnitInfo}` : ''}${taskTitle ? `\n*Jadwal Hari Kerja:* ${taskTime} WIB — ${taskTitle}` : ''}\n\n_Foto & data otomatis tersinkron ke Web App._`;
+    const replyText = `${icon} *Hasil Analisis Foto AgroSync AI*\n*Unit:* ${detectedUnitName}\n*Pengirim:* ${senderName}\n*Diagnosis:* ${diagnosis}\n*Penanganan:* ${treatment}${aiUpdatedUnitInfo ? `\n*Pembaruan Unit:* ${aiUpdatedUnitInfo}` : ''}${taskTitle ? `\n*Jadwal Hari Kerja:* ${taskTime} WIB — ${taskTitle}` : ''}\n\n_Foto & data otomatis tersinkron ke Web App._`;
     await tgApi(token, 'sendMessage', { chat_id: chatId, text: replyText, parse_mode: 'Markdown', reply_markup: getMainInlineKeyboard() });
     // Broadcast juga ke semua ID Telegram penerima lain agar seluruh tim mendapat notifikasi
     const otherTargets = getTelegramTargets(state).filter(cid => String(cid) !== String(chatId));

@@ -3423,7 +3423,8 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
           if (!data) {
             return { ok: false, reason: 'api_error', error: 'Respons provider bukan JSON valid: ' + rawRespText.slice(0, 120) };
           }
-          const content = data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
+          const choiceMsg = data && data.choices && data.choices[0] && data.choices[0].message;
+          const content = choiceMsg ? (choiceMsg.content || choiceMsg.reasoning_content || '') : '';
           const usedTokens = (data && data.usage && data.usage.total_tokens) ? data.usage.total_tokens : Math.round((JSON.stringify(messages).length + content.length) / 4);
           cfg.callsToday += 1;
           cfg.totalTokensEst = (cfg.totalTokensEst || 0) + usedTokens;
@@ -5317,7 +5318,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
             const aiRes = await callConfiguredAi([
               { role: 'system', content: 'Kamu ahli agronomi & akuakultur Indonesia. ' + GROUNDED_AI_STANDARDS + ' Analisis foto secara cermat meskipun pengguna tidak mengisi gejala manual. Nilai perkembangan & potensi penyakit HANYA berdasarkan foto dan acuan resmi di atas. Balas HANYA JSON valid.' },
               { role: 'user', content: userContent }
-            ], 420);
+            ], 2500);
             if (btn) { btn.disabled = false; btn.textContent = 'Analisis Foto & Data'; }
 
             if (aiRes.ok) {
@@ -5935,7 +5936,7 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
           const aiRes = await callConfiguredAi([
             { role: 'system', content: 'Kamu Asisten AgroSync AI Kapanewon Pengasih. ' + GROUNDED_AI_STANDARDS + ' Jawab padat, praktis, berdasarkan data aplikasi dan foto (jika dilampirkan), sebutkan acuan standar relevan, maksimal 4 poin dalam bahasa Indonesia.' },
             { role: 'user', content: userContent }
-          ], 380);
+          ], photoDataUrl ? 2500 : 450);
           if (btn) { btn.disabled = false; btn.textContent = 'Kirim'; }
           replyText = aiRes.ok ? aiRes.content.trim() : (generateLocalReply(text) + `\n\n_(Catatan: ${aiRes.error})_`);
           updateHeaderBadges();

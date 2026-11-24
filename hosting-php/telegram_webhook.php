@@ -109,8 +109,8 @@ if (!empty($upd['message']['photo']) && is_array($upd['message']['photo'])) {
             CURLOPT_POSTFIELDS => json_encode([
                 'model' => $aiCfg['model'] ?? 'nvidia/nemotron-3.5-super-vl-120b-a12b', 'max_tokens' => 2500, 'temperature' => 0.25,
                 'messages' => [
-                    ['role' => 'system', 'content' => 'Kamu ahli agronomi & akuakultur AgroSync AI (acuan KKP, IPB Digitani, PIAT UGM, BRMP). Analisis foto tanaman/komoditas secara cermat untuk mendeteksi tanda pertumbuhan atau gejala penyakit/hama. Balas HANYA JSON: {"risk":"ok|warn|danger","diagnosis":"1-2 kalimat (sebutkan gejala penyakit jika ada)","treatment":"1-2 kalimat"}'],
-                    ['role' => 'user', 'content' => [['type' => 'text', 'text' => "Keterangan: " . ($caption ?: 'Cek hama/penyakit')], ['type' => 'image_url', 'image_url' => ['url' => $dataUrl]]]]
+                    ['role' => 'system', 'content' => 'Kamu ahli agronomi & akuakultur AgroSync AI Kapanewon Pengasih (acuan KKP, IPB Digitani, PIAT UGM, BRMP). ATURAN BAHASA: Seluruh hasil diagnosis dan penanganan WAJIB 100% BAHASA INDONESIA (DILARANG KERAS BAHASA INGGRIS). Analisis foto tanaman/komoditas secara cermat untuk mendeteksi tanda pertumbuhan atau gejala penyakit/hama. Balas HANYA JSON: {"risk":"ok|warn|danger","diagnosis":"1-2 kalimat bahasa indonesia (sebutkan gejala penyakit jika ada)","treatment":"1-2 kalimat bahasa indonesia"}'],
+                    ['role' => 'user', 'content' => [['type' => 'text', 'text' => "Keterangan: " . ($caption ?: 'Cek hama/penyakit') . ". Wajib jawab HANYA dalam BAHASA INDONESIA!"], ['type' => 'image_url', 'image_url' => ['url' => $dataUrl]]]]
                 ]
             ])
         ]);
