@@ -937,7 +937,8 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
   const fallbackName = [msg.from && msg.from.first_name, msg.from && msg.from.last_name].filter(Boolean).join(' ');
   const senderName = findUserNameByChatId(state, chatId, fallbackName);
 
-  const chosen = photos[Math.min(photos.length - 1, 2)];
+  // Pilih foto resolusi sedang (ideal untuk Vision AI / NVIDIA NIM: ~600-800px, tidak melebihi limit payload)
+  const chosen = photos.length > 2 ? photos[photos.length - 2] : photos[photos.length - 1];
   const aiCfg = (state && state.aiConfig) || {};
   const targetUnit = (sess.unitId && sess.unitId !== 'auto')
     ? (state.units || []).find(u => u.id === sess.unitId)
@@ -964,28 +965,41 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
     if (sess.mode === 'add_unit' && sess.step === 'metrics') {
       let estAge = 14, estMetric = 10, estNote = 'Sehat & Aktif';
       if (aiCfg.enabled && aiCfg.apiKey && aiCfg.baseUrl && aiCfg.baseUrl.startsWith('https://')) {
-        const endpoint = aiCfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
-        const aiResp = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiCfg.apiKey.trim() },
-          body: JSON.stringify({
-            model: aiCfg.model || 'gpt-4o-mini',
-            max_tokens: 250,
-            temperature: 0.2,
-            messages: [
-              { role: 'system', content: 'Analisis foto unit budidaya baru. Balas HANYA JSON: {"ageDays":14,"metric":10,"statusNote":"kondisi singkat"}' },
-              { role: 'user', content: [{ type: 'text', text: `Unit ${sess.name} (${sess.category}/${sess.species}). Perkirakan umur hari, ukuran cm/mm, dan statusnya.` }, { type: 'image_url', image_url: { url: dataUrl } }] }
-            ]
-          })
-        });
-        const aiData = await aiResp.json();
-        const content = aiData && aiData.choices && aiData.choices[0] && aiData.choices[0].message ? aiData.choices[0].message.content : '';
-        const m = content.match(/\{[\s\S]*\}/);
-        if (m) {
-          const p = JSON.parse(m[0]);
-          if (p.ageDays) estAge = Math.max(1, Math.round(Number(p.ageDays)));
-          if (p.metric) estMetric = Math.max(0.1, Number(p.metric));
-          if (p.statusNote) estNote = String(p.statusNote).slice(0, 60);
+        try {
+          const endpoint = aiCfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
+          const aiResp = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiCfg.apiKey.trim() },
+            body: JSON.stringify({
+              model: aiCfg.model || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
+              max_tokens: 1500,
+              temperature: 0.2,
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: `Instruksi: Analisis foto unit budidaya baru. Balas HANYA JSON valid: {"ageDays":14,"metric":10,"statusNote":"kondisi singkat"}\nData: Unit ${sess.name} (${sess.category}/${sess.species}). Perkirakan umur hari, ukuran cm/mm, dan statusnya.` },
+                    { type: 'image_url', image_url: { url: dataUrl } }
+                  ]
+                }
+              ]
+            })
+          });
+          if (aiResp.ok) {
+            const aiData = await aiResp.json();
+            const choiceMsg = aiData && aiData.choices && aiData.choices[0] && aiData.choices[0].message;
+            let content = choiceMsg ? (choiceMsg.content || choiceMsg.reasoning_content || '') : '';
+            content = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+            const m = content.match(/\{[\s\S]*\}/);
+            if (m) {
+              const p = JSON.parse(m[0]);
+              if (p.ageDays) estAge = Math.max(1, Math.round(Number(p.ageDays)));
+              if (p.metric) estMetric = Math.max(0.1, Number(p.metric));
+              if (p.statusNote) estNote = String(p.statusNote).slice(0, 60);
+            }
+          }
+        } catch (eAdd) {
+          console.error('[Add Unit AI Photo Error]:', eAdd.message);
         }
       }
       const newUnit = createUnitFromTelegram(sess, estAge, estMetric, estNote, dataUrl, senderName);
@@ -1013,82 +1027,124 @@ async function handleTelegramPhotoMessage(token, msg, timeKey) {
       const w = state.weatherData && state.weatherData.current ? `Cuaca: ${state.weatherData.current.temp}C, ${state.weatherData.current.desc}.` : '';
       const unitsSummary = (state.units || []).map(u => `${u.id}:${u.name}(${u.species},Hr${u.ageDays},${u.metric})`).join('; ');
       const endpoint = aiCfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
+
+      const promptSystem = 'Kamu ahli agronomi & akuakultur AgroSync AI Kapanewon Pengasih. ' + GROUNDED_AI_STANDARDS + ' Analisis foto secara SANGAT CERMAT meskipun pengguna tidak menulis teks. Periksa apakah foto ini unit baru atau unit lama, jenis komoditas (lele/nila, maggot bsf, atau sayuran), tahap pertumbuhan, estimasi ukuran, dan tanda penyakit. Balas HANYA JSON valid: {"risk":"ok|warn|danger","isNewUnit":false,"category":"ternak|maggot|tanaman","species":"nama komoditas spesifik","unitId":"id unit jika cocok","unitName":"nama unit","population":"estimasi populasi","ageDays":10,"estimatedMetric":7.5,"diagnosis":"analisis visual cermat 1-2 kalimat","treatment":"langkah penanganan praktis 1-2 kalimat","statusNote":"status singkat 2-4 kata","taskTitle":"tugas jam kerja kantor 07:30-16:00 WIB jika perlu","taskTime":"07:30"}';
+      const promptUser = `[PETUNJUK SISTEM]:\n${promptSystem}\n\n[DATA BUDIDAYA & KONDISI]:\nPengirim: ${senderName}. ${w} Ekosistem Sirkular: sampah ${(state.ecoStats&&state.ecoStats.wasteKg)||0}kg, air kolam ${(state.ecoStats&&state.ecoStats.waterLiters)||0}L, kasgot ${(state.ecoStats&&state.ecoStats.kasgotKg)||0}kg. Unit terpilih: ${targetUnit ? `${targetUnit.id}:${targetUnit.name} (${targetUnit.species}, Hr ${targetUnit.ageDays}, ukuran ${targetUnit.metric})` : 'Auto-deteksi'}. Daftar unit saat ini: ${unitsSummary || 'KOSONG (belum ada unit tersimpan)'}. Keterangan pengguna: ${caption || 'KOSONG - wajib analisis visual cermat dari foto saja'}`;
+
       const aiResp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiCfg.apiKey.trim() },
         body: JSON.stringify({
           model: aiCfg.model || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
-          max_tokens: 500,
-          temperature: 0.25,
+          max_tokens: 2048,
+          temperature: 0.2,
           messages: [
-            { role: 'system', content: 'Kamu ahli agronomi & akuakultur AgroSync AI Kapanewon Pengasih. ' + GROUNDED_AI_STANDARDS + ' Analisis foto secara SANGAT CERMAT meskipun pengguna tidak menulis teks. Periksa apakah foto ini unit baru atau unit lama, jenis komoditas (lele/nila, maggot bsf, atau sayuran), tahap pertumbuhan, estimasi ukuran, dan tanda penyakit. Balas HANYA JSON valid: {"risk":"ok|warn|danger","isNewUnit":false,"category":"ternak|maggot|tanaman","species":"nama komoditas spesifik","unitId":"id unit jika cocok","unitName":"nama unit","population":"estimasi populasi","ageDays":10,"estimatedMetric":7.5,"diagnosis":"analisis visual cermat 1-2 kalimat","treatment":"langkah penanganan praktis 1-2 kalimat","statusNote":"status singkat 2-4 kata","taskTitle":"tugas jam kerja kantor 07:30-16:00 WIB jika perlu","taskTime":"07:30"}' },
             {
               role: 'user',
               content: [
-                { type: 'text', text: `Pengirim: ${senderName}. ${w} Ekosistem Sirkular: sampah ${(state.ecoStats&&state.ecoStats.wasteKg)||0}kg, air kolam ${(state.ecoStats&&state.ecoStats.waterLiters)||0}L, kasgot ${(state.ecoStats&&state.ecoStats.kasgotKg)||0}kg. Unit terpilih: ${targetUnit ? `${targetUnit.id}:${targetUnit.name} (${targetUnit.species}, Hr ${targetUnit.ageDays}, ukuran ${targetUnit.metric})` : 'Auto-deteksi'}. Daftar unit saat ini: ${unitsSummary || 'KOSONG (belum ada unit tersimpan)'}. Keterangan pengguna: ${caption || 'KOSONG - wajib analisis visual cermat dari foto saja'}` },
+                { type: 'text', text: promptUser },
                 { type: 'image_url', image_url: { url: dataUrl } }
               ]
             }
           ]
         })
       });
-      const aiData = await aiResp.json();
-      const content = aiData && aiData.choices && aiData.choices[0] && aiData.choices[0].message ? aiData.choices[0].message.content : '';
-      const match = content.match(/\{[\s\S]*\}/);
-      if (match) {
-        const parsed = JSON.parse(match[0]);
-        diagnosis = parsed.diagnosis || diagnosis;
-        treatment = parsed.treatment || treatment;
-        risk = ['ok', 'warn', 'danger'].includes(parsed.risk) ? parsed.risk : 'warn';
-        taskTitle = parsed.taskTitle || '';
-        taskTime = clampToOfficeHours(parsed.taskTime, '07:30');
-        engine = 'AI Vision (TG)';
-        tokens = (aiData.usage && aiData.usage.total_tokens) || 0;
 
-        let matchedUnit = targetUnit || (state.units || []).find(u => u.id === parsed.unitId || (parsed.unitName && u.name.toLowerCase().includes(String(parsed.unitName).toLowerCase())));
-        if (matchedUnit) {
-          detectedUnitName = matchedUnit.name;
-          targetUnit = matchedUnit;
-          if (parsed.statusNote && String(parsed.statusNote).trim()) {
-            matchedUnit.statusNote = String(parsed.statusNote).trim().slice(0, 60);
-            aiUpdatedUnitInfo = `Status -> "${matchedUnit.statusNote}"`;
+      if (!aiResp.ok) {
+        const errRaw = await aiResp.text();
+        let errData = null;
+        try { errData = JSON.parse(errRaw); } catch (_) {}
+        const rawErrMsg = (errData && errData.error && (errData.error.message || errData.error))
+          || (errData && errData.detail)
+          || `HTTP ${aiResp.status}: ${errRaw.slice(0, 160)}`;
+        console.error('[Telegram Photo AI Error]:', aiResp.status, rawErrMsg);
+
+        let modelTip = '';
+        if (/does not support|modality|not support vision|image_url|invalid_request/i.test(String(rawErrMsg))) {
+          modelTip = '\n\n💡 *Penyebab:* Model NVIDIA yang Anda pilih bertipe teks-murni (seperti Nemotron-70B/340B teks). Untuk analisis gambar di NVIDIA NIM, gunakan model Vision seperti `meta/llama-3.2-11b-vision-instruct` atau `qwen/qwen2.5-vl-72b-instruct`.';
+        } else if (/unauthorized|invalid api key|401/i.test(String(rawErrMsg))) {
+          modelTip = '\n\n💡 *Penyebab:* API Key NVIDIA NIM tidak valid atau salah.';
+        }
+        diagnosis = `Gagal dianalisis oleh AI: ${String(rawErrMsg).slice(0, 140)}${modelTip}`;
+        treatment = 'Periksa nama model & API Key di tab Konfigurasi Web App.';
+        risk = 'warn';
+      } else {
+        const aiData = await aiResp.json();
+        const choiceMsg = aiData && aiData.choices && aiData.choices[0] && aiData.choices[0].message;
+        let content = choiceMsg ? (choiceMsg.content || choiceMsg.reasoning_content || '') : '';
+        content = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+        let parsed = null;
+        const codeBlock = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (codeBlock) {
+          try { parsed = JSON.parse(codeBlock[1].trim()); } catch (_) {}
+        }
+        if (!parsed) {
+          const firstBrace = content.indexOf('{');
+          const lastBrace = content.lastIndexOf('}');
+          if (firstBrace !== -1 && lastBrace > firstBrace) {
+            try { parsed = JSON.parse(content.slice(firstBrace, lastBrace + 1).trim()); } catch (_) {}
           }
-          if (parsed.estimatedMetric && !isNaN(Number(parsed.estimatedMetric)) && Number(parsed.estimatedMetric) > 0) {
-            const est = Math.round(Number(parsed.estimatedMetric) * 10) / 10;
-            matchedUnit.metric = est;
-            if (!Array.isArray(matchedUnit.history)) matchedUnit.history = [];
-            matchedUnit.history.push(est);
-            if (matchedUnit.history.length > 12) matchedUnit.history.shift();
-            const mU = matchedUnit.category === 'maggot' ? 'mm' : 'cm';
-            aiUpdatedUnitInfo += (aiUpdatedUnitInfo ? ', ' : '') + `Ukuran -> ${est} ${mU}`;
+        }
+
+        if (parsed) {
+          diagnosis = parsed.diagnosis || diagnosis;
+          treatment = parsed.treatment || treatment;
+          risk = ['ok', 'warn', 'danger'].includes(parsed.risk) ? parsed.risk : 'warn';
+          taskTitle = parsed.taskTitle || '';
+          taskTime = clampToOfficeHours(parsed.taskTime, '07:30');
+          engine = 'AI Vision (TG)';
+          tokens = (aiData.usage && aiData.usage.total_tokens) || 0;
+
+          let matchedUnit = targetUnit || (state.units || []).find(u => u.id === parsed.unitId || (parsed.unitName && u.name.toLowerCase().includes(String(parsed.unitName).toLowerCase())));
+          if (matchedUnit) {
+            detectedUnitName = matchedUnit.name;
+            targetUnit = matchedUnit;
+            if (parsed.statusNote && String(parsed.statusNote).trim()) {
+              matchedUnit.statusNote = String(parsed.statusNote).trim().slice(0, 60);
+              aiUpdatedUnitInfo = `Status -> "${matchedUnit.statusNote}"`;
+            }
+            if (parsed.estimatedMetric && !isNaN(Number(parsed.estimatedMetric)) && Number(parsed.estimatedMetric) > 0) {
+              const est = Math.round(Number(parsed.estimatedMetric) * 10) / 10;
+              matchedUnit.metric = est;
+              if (!Array.isArray(matchedUnit.history)) matchedUnit.history = [];
+              matchedUnit.history.push(est);
+              if (matchedUnit.history.length > 12) matchedUnit.history.shift();
+              const mU = matchedUnit.category === 'maggot' ? 'mm' : 'cm';
+              aiUpdatedUnitInfo += (aiUpdatedUnitInfo ? ', ' : '') + `Ukuran -> ${est} ${mU}`;
+            }
+          } else {
+            // Jika belum ada unit tersimpan atau terdeteksi foto unit baru:
+            const shouldCreateNew = (!state.units || state.units.length === 0) || parsed.isNewUnit || /(tambah|baru|tebar|tanam|bibit|benih|kolam|biopond|bedeng|polybag)/i.test(caption);
+            if (shouldCreateNew) {
+              let cat = ['ternak', 'maggot', 'tanaman'].includes(parsed.category) ? parsed.category : 'tanaman';
+              if (/(lele|nila|ikan|kolam)/i.test(caption) || /(lele|nila|ikan)/i.test(parsed.species || '')) cat = 'ternak';
+              else if (/(maggot|bsf|larva|biopond)/i.test(caption) || /(maggot|bsf)/i.test(parsed.species || '')) cat = 'maggot';
+
+              const sp = parsed.species || (cat === 'ternak' ? 'Ikan Lele' : cat === 'maggot' ? 'Maggot BSF' : 'Cabai Rawit');
+              let uName = parsed.unitName || caption || (cat === 'ternak' ? 'Kolam Lele 1' : cat === 'maggot' ? 'Biopond Maggot 1' : 'Unit Tanaman 1');
+              uName = uName.slice(0, 40);
+              const pop = parsed.population || (cat === 'ternak' ? '200 ekor' : cat === 'maggot' ? '1 kg' : '10 polybag');
+              const estAge = Math.max(1, Math.round(Number(parsed.ageDays) || 7));
+              const estMetric = Math.max(0.1, Math.round((Number(parsed.estimatedMetric) || (cat === 'maggot' ? 8 : 7)) * 10) / 10);
+
+              const newUnit = createUnitFromTelegram({
+                category: cat,
+                species: sp,
+                name: uName,
+                population: pop
+              }, estAge, estMetric, parsed.statusNote || 'Sehat & Aktif', '', senderName);
+
+              targetUnit = newUnit;
+              detectedUnitName = newUnit.name;
+              const mU = cat === 'maggot' ? 'mm' : 'cm';
+              aiUpdatedUnitInfo = `✨ *Unit Baru Otomatis Dibuat:* ${newUnit.name} (${newUnit.species}, Hr ${estAge}, ${estMetric} ${mU}) + Jadwal kantor 07:30–16:00 WIB aktif`;
+            }
           }
-        } else {
-          // Jika belum ada unit tersimpan atau terdeteksi foto unit baru:
-          const shouldCreateNew = (!state.units || state.units.length === 0) || parsed.isNewUnit || /(tambah|baru|tebar|tanam|bibit|benih|kolam|biopond|bedeng|polybag)/i.test(caption);
-          if (shouldCreateNew) {
-            let cat = ['ternak', 'maggot', 'tanaman'].includes(parsed.category) ? parsed.category : 'tanaman';
-            if (/(lele|nila|ikan|kolam)/i.test(caption) || /(lele|nila|ikan)/i.test(parsed.species || '')) cat = 'ternak';
-            else if (/(maggot|bsf|larva|biopond)/i.test(caption) || /(maggot|bsf)/i.test(parsed.species || '')) cat = 'maggot';
-
-            const sp = parsed.species || (cat === 'ternak' ? 'Ikan Lele' : cat === 'maggot' ? 'Maggot BSF' : 'Cabai Rawit');
-            let uName = parsed.unitName || caption || (cat === 'ternak' ? 'Kolam Lele 1' : cat === 'maggot' ? 'Biopond Maggot 1' : 'Unit Tanaman 1');
-            uName = uName.slice(0, 40);
-            const pop = parsed.population || (cat === 'ternak' ? '200 ekor' : cat === 'maggot' ? '1 kg' : '10 polybag');
-            const estAge = Math.max(1, Math.round(Number(parsed.ageDays) || 7));
-            const estMetric = Math.max(0.1, Math.round((Number(parsed.estimatedMetric) || (cat === 'maggot' ? 8 : 7)) * 10) / 10);
-
-            const newUnit = createUnitFromTelegram({
-              category: cat,
-              species: sp,
-              name: uName,
-              population: pop
-            }, estAge, estMetric, parsed.statusNote || 'Sehat & Aktif', '', senderName);
-
-            targetUnit = newUnit;
-            detectedUnitName = newUnit.name;
-            const mU = cat === 'maggot' ? 'mm' : 'cm';
-            aiUpdatedUnitInfo = `✨ *Unit Baru Otomatis Dibuat:* ${newUnit.name} (${newUnit.species}, Hr ${estAge}, ${estMetric} ${mU}) + Jadwal kantor 07:30–16:00 WIB aktif`;
-          }
+        } else if (content) {
+          diagnosis = content.slice(0, 250);
+          treatment = 'Lakukan observasi visual berkala.';
+          engine = 'AI Vision (TG)';
         }
       }
     }

@@ -89,7 +89,7 @@ if (!empty($upd['message']['photo']) && is_array($upd['message']['photo'])) {
     $fb = trim(($upd['message']['from']['first_name'] ?? '') . ' ' . ($upd['message']['from']['last_name'] ?? ''));
     $sender = find_user_name($state, $chatId, $fb);
     $photos = $upd['message']['photo'];
-    $chosen = $photos[min(count($photos) - 1, 2)];
+    $chosen = count($photos) > 2 ? $photos[count($photos) - 2] : $photos[count($photos) - 1];
     $fileInfo = json_decode(tg_post($token, 'getFile', ['file_id' => $chosen['file_id']]), true);
     $filePath = $fileInfo['result']['file_path'] ?? '';
     $diagnosis = 'Foto tercatat ke Web App. Aktifkan API Key AI Vision di Konfigurasi untuk analisis otomatis.';
@@ -102,24 +102,46 @@ if (!empty($upd['message']['photo']) && is_array($upd['message']['photo'])) {
     }
     $aiCfg = $state['aiConfig'] ?? [];
     if ($dataUrl && !empty($aiCfg['enabled']) && !empty($aiCfg['apiKey']) && !empty($aiCfg['baseUrl'])) {
+        $sysInstr = 'Kamu ahli agronomi & akuakultur AgroSync AI (acuan KKP, IPB Digitani, PIAT UGM, BRMP). Balas HANYA JSON valid: {"risk":"ok|warn|danger","diagnosis":"1-2 kalimat","treatment":"1-2 kalimat"}';
+        $userPrompt = "[PETUNJUK SISTEM]:\n{$sysInstr}\n\n[KETERANGAN PENGGUNA]:\n" . ($caption ?: 'Analisis visual komoditas dari foto ini secara cermat.');
         $ch = curl_init(rtrim($aiCfg['baseUrl'], '/') . '/chat/completions');
         curl_setopt_array($ch, [
-            CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 25,
+            CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30,
             CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . trim($aiCfg['apiKey'])],
             CURLOPT_POSTFIELDS => json_encode([
-                'model' => $aiCfg['model'] ?? 'gpt-4o-mini', 'max_tokens' => 320, 'temperature' => 0.25,
+                'model' => $aiCfg['model'] ?? 'nvidia/nemotron-3.5-super-vl-120b-a12b', 'max_tokens' => 1500, 'temperature' => 0.2,
                 'messages' => [
-                    ['role' => 'system', 'content' => 'Kamu ahli agronomi & akuakultur AgroSync AI (acuan KKP, IPB Digitani, PIAT UGM, BRMP). Balas HANYA JSON: {"risk":"ok|warn|danger","diagnosis":"1-2 kalimat","treatment":"1-2 kalimat"}'],
-                    ['role' => 'user', 'content' => [['type' => 'text', 'text' => "Keterangan: " . ($caption ?: 'Cek hama/penyakit')], ['type' => 'image_url', 'image_url' => ['url' => $dataUrl]]]]
+                    ['role' => 'user', 'content' => [['type' => 'text', 'text' => $userPrompt], ['type' => 'image_url', 'image_url' => ['url' => $dataUrl]]]]
                 ]
             ])
         ]);
-        $aiRaw = curl_exec($ch); curl_close($ch);
+        $aiRaw = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
         $aiJson = json_decode($aiRaw, true);
-        $txt = $aiJson['choices'][0]['message']['content'] ?? '';
-        if (preg_match('/\{[\s\S]*\}/', $txt, $m)) {
-            $p = json_decode($m[0], true);
-            if (!empty($p['diagnosis'])) { $diagnosis = $p['diagnosis']; $treatment = $p['treatment'] ?? $treatment; $risk = $p['risk'] ?? 'warn'; }
+
+        if ($httpCode >= 400 || !empty($aiJson['error']) || !empty($aiJson['detail'])) {
+            $rawErr = $aiJson['error']['message'] ?? $aiJson['detail'] ?? "HTTP {$httpCode}: " . substr($aiRaw ?: '', 0, 140);
+            $tip = '';
+            if (preg_match('/does not support|modality|not support vision|image_url|invalid_request/i', (string)$rawErr)) {
+                $tip = "\n\n💡 *Penyebab:* Model NVIDIA yang dipilih bertipe teks-murni. Gunakan model Vision seperti `meta/llama-3.2-11b-vision-instruct` atau `qwen/qwen2.5-vl-72b-instruct`.";
+            }
+            $diagnosis = "Gagal analisis AI: " . substr((string)$rawErr, 0, 140) . $tip;
+            $treatment = "Periksa nama model & API Key di Konfigurasi Web App.";
+        } else {
+            $choice = $aiJson['choices'][0]['message'] ?? [];
+            $txt = $choice['content'] ?? $choice['reasoning_content'] ?? '';
+            $txt = preg_replace('/<think>[\s\S]*?<\/think>/i', '', $txt);
+            if (preg_match('/\{[\s\S]*\}/', $txt, $m)) {
+                $p = json_decode($m[0], true);
+                if (!empty($p['diagnosis'])) {
+                    $diagnosis = $p['diagnosis'];
+                    $treatment = $p['treatment'] ?? $treatment;
+                    $risk = in_array($p['risk'] ?? '', ['ok', 'warn', 'danger']) ? $p['risk'] : 'warn';
+                }
+            } elseif (!empty(trim($txt))) {
+                $diagnosis = substr(trim($txt), 0, 250);
+            }
         }
     }
     if (!isset($state['photoLogs']) || !is_array($state['photoLogs'])) $state['photoLogs'] = [];
