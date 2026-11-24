@@ -1,0 +1,15 @@
+[Unit]
+Description=AgroSync AI Server & 2-Way Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/agrosync
+ExecStart=/usr/bin/node /opt/agrosync/server.js
+Environment=PORT=3080
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
