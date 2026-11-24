@@ -4887,14 +4887,10 @@ CARA 2 — Di Server Linux Lokal + Cloudflare Tunnel (24/7 + Telegram Bot 2-Arah
           }
         });
 
-        document.getElementById('btnHeaderSync').addEventListener('click', () => {
-          const keepTab = state.activeTab;
-          state = loadState();
-          state.activeTab = (currentRole !== 'admin' && keepTab === 'config') ? 'dashboard' : keepTab;
-          saveState(false);
-          pullStateFromServer(false);
+        document.getElementById('btnHeaderSync').addEventListener('click', async () => {
+          await pullStateFromServer(false);
           renderAll();
-          showToast('Data berhasil disinkronkan ke semua pengguna aktif!');
+          showToast('Data berhasil disinkronkan dari Server & Telegram Bot!');
         });
 
         document.getElementById('btnLogout').addEventListener('click', () => {

@@ -2517,11 +2517,61 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const incoming = JSON.parse(body);
-        // Jangan timpa data users yang tersimpan di server dengan data dari client
-        // (password tidak dikirim client - lihat pushStateToServer di index.html)
+
+        // 1. Proteksi Akun & Password (jangan timpa data users server dengan data client)
         if (state && Array.isArray(state.users) && (!incoming.users || !Array.isArray(incoming.users))) {
           incoming.users = state.users;
         }
+
+        // 2. Proteksi Konfigurasi Bot Telegram (jangan biarkan token terhapus oleh client kosong)
+        if (state && state.telegram && state.telegram.token && (!incoming.telegram || !incoming.telegram.token || !String(incoming.telegram.token).trim())) {
+          incoming.telegram = Object.assign({}, state.telegram, incoming.telegram || {}, {
+            token: state.telegram.token,
+            enabled: state.telegram.enabled,
+            chatId: state.telegram.chatId || incoming.telegram?.chatId
+          });
+        }
+
+        // 3. Proteksi Konfigurasi AI Vision (jangan biarkan API Key terhapus oleh client)
+        if (state && state.aiConfig && state.aiConfig.apiKey && (!incoming.aiConfig || !incoming.aiConfig.apiKey || !String(incoming.aiConfig.apiKey).trim())) {
+          incoming.aiConfig = Object.assign({}, state.aiConfig, incoming.aiConfig || {}, {
+            apiKey: state.aiConfig.apiKey,
+            enabled: state.aiConfig.enabled,
+            baseUrl: state.aiConfig.baseUrl || incoming.aiConfig?.baseUrl,
+            model: state.aiConfig.model || incoming.aiConfig?.model
+          });
+        }
+
+        // 4. Proteksi & Penggabungan Riwayat Foto (Photo Logs)
+        if (state && Array.isArray(state.photoLogs) && state.photoLogs.length > 0) {
+          const incPhotos = Array.isArray(incoming.photoLogs) ? incoming.photoLogs : [];
+          const pMap = new Map();
+          state.photoLogs.forEach(p => { if (p && p.id) pMap.set(p.id, p); });
+          incPhotos.forEach(p => { if (p && p.id) pMap.set(p.id, p); });
+          incoming.photoLogs = Array.from(pMap.values()).slice(0, 20);
+        }
+
+        // 5. Proteksi Unit Budidaya (jangan timpa daftar unit server jika client mengirim kosong)
+        if (state && Array.isArray(state.units) && state.units.length > 0 && (!Array.isArray(incoming.units) || incoming.units.length === 0)) {
+          incoming.units = state.units;
+        }
+
+        // 6. Proteksi Jurnal AI & Catatan Aktivitas
+        if (state && Array.isArray(state.aiJournal) && state.aiJournal.length > 0) {
+          const incJ = Array.isArray(incoming.aiJournal) ? incoming.aiJournal : [];
+          const jMap = new Map();
+          state.aiJournal.forEach(j => { if (j && j.id) jMap.set(j.id, j); });
+          incJ.forEach(j => { if (j && j.id) jMap.set(j.id, j); });
+          incoming.aiJournal = Array.from(jMap.values()).slice(0, 50);
+        }
+        if (state && Array.isArray(state.activityLogs) && state.activityLogs.length > 0) {
+          const incA = Array.isArray(incoming.activityLogs) ? incoming.activityLogs : [];
+          const aMap = new Map();
+          state.activityLogs.forEach(a => { if (a && a.id) aMap.set(a.id, a); });
+          incA.forEach(a => { if (a && a.id) aMap.set(a.id, a); });
+          incoming.activityLogs = Array.from(aMap.values()).slice(0, 100);
+        }
+
         saveState(incoming);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, updatedAt: state.updatedAt }));
